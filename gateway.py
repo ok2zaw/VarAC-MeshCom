@@ -14,6 +14,7 @@ gateway.db so the web UI can show status and history.
 Run alongside webapp.py (see systemd/ for service files).
 """
 
+import imaplib
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ import smtplib
 import socket
 import threading
 import time
+import uuid
 from email import policy
 from email.parser import BytesParser
 from email.mime.text import MIMEText
@@ -125,6 +127,15 @@ def udp_listener():
 # email -> mesh
 # ---------------------------------------------------------------------
 
+def write_email_to_maildir(maildir_path: str, payload: bytes, prefix: str = "imap") -> str:
+    os.makedirs(maildir_path, exist_ok=True)
+    unique_name = f"{prefix}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}.eml"
+    file_path = os.path.join(maildir_path, unique_name)
+    with open(file_path, "wb") as f:
+        f.write(payload)
+    return file_path
+
+
 def parse_email_file(path: str):
     with open(path, "rb") as f:
         msg = BytesParser(policy=policy.default).parse(f)
@@ -146,9 +157,9 @@ def parse_email_file(path: str):
                 continue
 
             if filename:
-                attachments.append(f"{filename} ({content_type})")
+                attachments.append(filename)
             elif disposition == "attachment":
-                attachments.append(f"{content_type}")
+                attachments.append(content_type)
     else:
         body = msg.get_content()
 
@@ -215,6 +226,69 @@ def build_mesh_messages(sender: str, subject: str, body: str, attachments: list[
     return parts
 
 
+def fetch_imap_messages(cfg: dict) -> list[str]:
+    if not cfg.get("imap_host") or not cfg.get("imap_user"):
+        return []
+
+    server = None
+    try:
+        host = cfg["imap_host"]
+        port = int(cfg.get("imap_port", 993))
+        folder = cfg.get("imap_folder", "INBOX")
+        maildir = cfg.get("maildir_new") or os.path.join(os.path.dirname(__file__), "Maildir", "new")
+        os.makedirs(maildir, exist_ok=True)
+
+        imap_class = imaplib.IMAP4_SSL if cfg.get("imap_use_ssl", True) else imaplib.IMAP4
+        server = imap_class(host, port, timeout=30)
+        server.login(cfg["imap_user"], cfg.get("imap_password", ""))
+        server.select(folder)
+
+        status, data = server.search(None, "UNSEEN")
+        if status != "OK" or not data or not data[0]:
+            return []
+
+        saved_paths = []
+        for msg_id in data[0].split():
+            status, payload = server.fetch(msg_id, "(RFC822)")
+            if status != "OK" or not payload:
+                continue
+            raw_message = None
+            for item in payload:
+                if isinstance(item, tuple) and len(item) >= 2:
+                    raw_message = item[1]
+                    break
+            if raw_message is None:
+                continue
+
+            saved = write_email_to_maildir(maildir, raw_message)
+            saved_paths.append(saved)
+            server.store(msg_id, "+FLAGS", "(\\Seen)")
+
+        return saved_paths
+    except Exception as exc:
+        log.error("IMAP fetch failed: %s", exc)
+        return []
+    finally:
+        if server is not None:
+            try:
+                server.logout()
+            except Exception:
+                pass
+
+
+def poll_imap():
+    while True:
+        cfg = common.load_config()
+        if cfg.get("imap_host"):
+            try:
+                saved = fetch_imap_messages(cfg)
+                if saved:
+                    log.info("Fetched %d message(s) from IMAP mailbox %s", len(saved), cfg.get("imap_folder", "INBOX"))
+            except Exception as exc:
+                log.error("IMAP polling error: %s", exc)
+        time.sleep(cfg.get("poll_interval_seconds", 5))
+
+
 def poll_maildir():
     cfg = common.load_config()
     log.info("Watching Maildir: %s", cfg["maildir_new"])
@@ -278,8 +352,10 @@ def main():
     threads = [
         threading.Thread(target=udp_listener, name="udp-listener", daemon=True),
         threading.Thread(target=poll_maildir, name="maildir-watcher", daemon=True),
-        threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True),
     ]
+    if cfg.get("imap_host"):
+        threads.append(threading.Thread(target=poll_imap, name="imap-watcher", daemon=True))
+    threads.append(threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True))
     for t in threads:
         t.start()
     for t in threads:

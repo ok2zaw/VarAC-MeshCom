@@ -88,23 +88,28 @@ def config_page():
         new_cfg = dict(cfg)
         for key in (
             "mesh_node_ip", "mesh_group", "smtp_host", "smtp_user",
-            "mail_from", "mail_to", "maildir_new", "maildir_cur", "callsign",
-            "web_username",
+            "mail_from", "mail_to", "maildir_new", "maildir_cur",
+            "imap_host", "imap_user", "imap_folder", "callsign", "web_username",
         ):
             new_cfg[key] = request.form.get(key, cfg.get(key, ""))
 
-        for key in ("mesh_udp_port", "smtp_port", "poll_interval_seconds", "max_mesh_payload"):
+        for key in ("mesh_udp_port", "smtp_port", "imap_port", "poll_interval_seconds", "max_mesh_payload"):
             raw = request.form.get(key)
             if raw:
                 new_cfg[key] = int(raw)
 
         new_cfg["smtp_use_tls"] = request.form.get("smtp_use_tls") == "on"
+        new_cfg["imap_use_ssl"] = request.form.get("imap_use_ssl") == "on"
 
         # Only overwrite passwords if a new value was actually typed in,
         # so the form doesn't need to round-trip secrets in plaintext.
         new_smtp_pw = request.form.get("smtp_password")
         if new_smtp_pw:
             new_cfg["smtp_password"] = new_smtp_pw
+
+        new_imap_pw = request.form.get("imap_password")
+        if new_imap_pw:
+            new_cfg["imap_password"] = new_imap_pw
 
         new_web_pw = request.form.get("web_password")
         if new_web_pw:

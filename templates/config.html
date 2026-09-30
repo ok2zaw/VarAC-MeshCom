@@ -62,6 +62,26 @@
     <label>Interval kontroly (s)
       <input type="number" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}">
     </label>
+
+    <label>IMAP server
+      <input type="text" name="imap_host" value="{{ cfg.imap_host }}">
+    </label>
+    <label>IMAP port
+      <input type="number" name="imap_port" value="{{ cfg.imap_port }}">
+    </label>
+    <label>IMAP uživatel
+      <input type="text" name="imap_user" value="{{ cfg.imap_user }}">
+    </label>
+    <label>IMAP heslo <span class="hint">(vyplň jen pro změnu)</span>
+      <input type="password" name="imap_password" value="" placeholder="••••••••">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="imap_use_ssl" {{ 'checked' if cfg.imap_use_ssl }}>
+      Použít IMAP SSL/TLS
+    </label>
+    <label>IMAP složka
+      <input type="text" name="imap_folder" value="{{ cfg.imap_folder }}">
+    </label>
   </fieldset>
 
   <fieldset>
