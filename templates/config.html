@@ -5,6 +5,17 @@
 
 {% if saved %}<p class="flash">Uloženo. Většina změn se projeví do pár vteřin, bez restartu démona.</p>{% endif %}
 
+{% if errors %}
+  <div class="flash error">
+    <strong>Chyba v konfiguraci:</strong>
+    <ul>
+      {% for field, message in errors.items() %}
+        <li>{{ field }}: {{ message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
 <form method="post" class="config-form">
   <fieldset>
     <legend>MeshCom</legend>
@@ -12,7 +23,7 @@
       <input type="text" name="mesh_node_ip" value="{{ cfg.mesh_node_ip }}">
     </label>
     <label>UDP port
-      <input type="number" name="mesh_udp_port" value="{{ cfg.mesh_udp_port }}">
+      <input type="number" name="mesh_udp_port" value="{{ cfg.mesh_udp_port }}" min="1" max="65535">
     </label>
     <label>Číslo skupiny
       <input type="text" name="mesh_group" value="{{ cfg.mesh_group }}">
@@ -21,7 +32,7 @@
       <input type="text" name="callsign" value="{{ cfg.callsign }}">
     </label>
     <label>Max. délka zprávy
-      <input type="number" name="max_mesh_payload" value="{{ cfg.max_mesh_payload }}">
+      <input type="number" name="max_mesh_payload" value="{{ cfg.max_mesh_payload }}" min="20" max="250">
     </label>
   </fieldset>
 
@@ -31,7 +42,7 @@
       <input type="text" name="smtp_host" value="{{ cfg.smtp_host }}">
     </label>
     <label>SMTP port
-      <input type="number" name="smtp_port" value="{{ cfg.smtp_port }}">
+      <input type="number" name="smtp_port" value="{{ cfg.smtp_port }}" min="1" max="65535">
     </label>
     <label>SMTP uživatel
       <input type="text" name="smtp_user" value="{{ cfg.smtp_user }}">
@@ -60,14 +71,14 @@
       <input type="text" name="maildir_cur" value="{{ cfg.maildir_cur }}">
     </label>
     <label>Interval kontroly (s)
-      <input type="number" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}">
+      <input type="number" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}" min="1" max="86400">
     </label>
 
     <label>IMAP server
       <input type="text" name="imap_host" value="{{ cfg.imap_host }}">
     </label>
     <label>IMAP port
-      <input type="number" name="imap_port" value="{{ cfg.imap_port }}">
+      <input type="number" name="imap_port" value="{{ cfg.imap_port }}" min="1" max="65535">
     </label>
     <label>IMAP uživatel
       <input type="text" name="imap_user" value="{{ cfg.imap_user }}">

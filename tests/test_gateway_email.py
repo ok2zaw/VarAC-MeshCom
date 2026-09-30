@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import common
 import gateway
+import webapp
 
 
 class GatewayEmailTests(unittest.TestCase):
@@ -61,6 +62,25 @@ class GatewayEmailTests(unittest.TestCase):
             self.assertTrue(os.path.isdir(result["new"]))
             self.assertTrue(os.path.isdir(result["cur"]))
             self.assertTrue(os.path.isdir(result["tmp"]))
+
+    def test_validate_config_values_rejects_invalid_ports(self):
+        result = webapp.validate_config_values(
+            {
+                "mesh_udp_port": "abc",
+                "smtp_port": "65536",
+                "imap_port": "-1",
+                "poll_interval_seconds": "0",
+                "max_mesh_payload": "0",
+            },
+            {},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("mesh_udp_port", result["errors"]) 
+        self.assertIn("smtp_port", result["errors"]) 
+        self.assertIn("imap_port", result["errors"]) 
+        self.assertIn("poll_interval_seconds", result["errors"]) 
+        self.assertIn("max_mesh_payload", result["errors"]) 
 
     def test_long_email_is_split_and_attachments_are_ignored(self):
         body = "A" * 500
