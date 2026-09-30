@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Zprávy – MeshCom Gateway{% endblock %}
+{% block content %}
+<h1>Historie zpráv</h1>
+
+<table class="msg-table">
+  <thead>
+    <tr><th>Čas</th><th>Směr</th><th>Odkud/komu</th><th>Předmět</th><th>Text</th><th>Stav</th></tr>
+  </thead>
+  <tbody>
+    {% for m in rows %}
+    <tr class="{{ 'row-error' if m.status == 'error' else '' }}">
+      <td>{{ m.ts }}</td>
+      <td>{{ '📶→✉️' if m.direction == 'mesh_to_email' else '✉️→📶' }}</td>
+      <td>{{ m.peer }}</td>
+      <td>{{ m.subject }}</td>
+      <td>{{ m.body }}</td>
+      <td>{{ '✅' if m.status == 'ok' else '⚠️ ' + (m.error or '') }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6">Zatím žádné zprávy.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="pagination">
+  {% if page > 1 %}<a href="?page={{ page - 1 }}">← předchozí</a>{% endif %}
+  <span>strana {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="?page={{ page + 1 }}">další →</a>{% endif %}
+</div>
+{% endblock %}

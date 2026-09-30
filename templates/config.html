@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Nastavení – MeshCom Gateway{% endblock %}
+{% block content %}
+<h1>Nastavení</h1>
+
+{% if saved %}<p class="flash">Uloženo. Většina změn se projeví do pár vteřin, bez restartu démona.</p>{% endif %}
+
+<form method="post" class="config-form">
+  <fieldset>
+    <legend>MeshCom</legend>
+    <label>IP adresa nodu
+      <input type="text" name="mesh_node_ip" value="{{ cfg.mesh_node_ip }}">
+    </label>
+    <label>UDP port
+      <input type="number" name="mesh_udp_port" value="{{ cfg.mesh_udp_port }}">
+    </label>
+    <label>Číslo skupiny
+      <input type="text" name="mesh_group" value="{{ cfg.mesh_group }}">
+    </label>
+    <label>Callsign gateway
+      <input type="text" name="callsign" value="{{ cfg.callsign }}">
+    </label>
+    <label>Max. délka zprávy
+      <input type="number" name="max_mesh_payload" value="{{ cfg.max_mesh_payload }}">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Odchozí e-mail (mesh → e-mail)</legend>
+    <label>SMTP server
+      <input type="text" name="smtp_host" value="{{ cfg.smtp_host }}">
+    </label>
+    <label>SMTP port
+      <input type="number" name="smtp_port" value="{{ cfg.smtp_port }}">
+    </label>
+    <label>SMTP uživatel
+      <input type="text" name="smtp_user" value="{{ cfg.smtp_user }}">
+    </label>
+    <label>SMTP heslo <span class="hint">(vyplň jen pro změnu)</span>
+      <input type="password" name="smtp_password" value="" placeholder="••••••••">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="smtp_use_tls" {{ 'checked' if cfg.smtp_use_tls }}>
+      Použít STARTTLS
+    </label>
+    <label>Odesílatel (From)
+      <input type="text" name="mail_from" value="{{ cfg.mail_from }}">
+    </label>
+    <label>Příjemce (To)
+      <input type="text" name="mail_to" value="{{ cfg.mail_to }}">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Příchozí e-mail (e-mail → mesh)</legend>
+    <label>Cesta k Maildir/new
+      <input type="text" name="maildir_new" value="{{ cfg.maildir_new }}">
+    </label>
+    <label>Cesta k Maildir/cur
+      <input type="text" name="maildir_cur" value="{{ cfg.maildir_cur }}">
+    </label>
+    <label>Interval kontroly (s)
+      <input type="number" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Přístup do tohoto webu</legend>
+    <label>Uživatel
+      <input type="text" name="web_username" value="{{ cfg.web_username }}">
+    </label>
+    <label>Heslo <span class="hint">(vyplň jen pro změnu)</span>
+      <input type="password" name="web_password" value="" placeholder="••••••••">
+    </label>
+  </fieldset>
+
+  <button type="submit">Uložit</button>
+</form>
+{% endblock %}

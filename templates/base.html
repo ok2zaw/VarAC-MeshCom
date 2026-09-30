@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}MeshCom Gateway{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand">📡 MeshCom Gateway</span>
+  <a href="{{ url_for('status') }}">Stav</a>
+  <a href="{{ url_for('messages') }}">Zprávy</a>
+  <a href="{{ url_for('config_page') }}">Nastavení</a>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

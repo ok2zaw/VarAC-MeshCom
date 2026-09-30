@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Stav – MeshCom Gateway{% endblock %}
+{% block content %}
+<h1>Stav gateway</h1>
+
+<div class="cards">
+  <div class="card {{ 'ok' if alive else 'bad' }}">
+    <div class="card-label">Démon</div>
+    <div class="card-value">
+      {% if alive %}🟢 Běží{% else %}🔴 Neběží{% endif %}
+    </div>
+    <div class="card-sub">
+      {% if age is not none %}poslední heartbeat před {{ age }} s{% else %}žádný heartbeat zatím{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Skupina</div>
+    <div class="card-value">{{ cfg.mesh_group }}</div>
+    <div class="card-sub">node {{ cfg.mesh_node_ip }}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Mesh → Email</div>
+    <div class="card-value">{{ counts.mesh_to_email }}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Email → Mesh</div>
+    <div class="card-value">{{ counts.email_to_mesh }}</div>
+  </div>
+
+  <div class="card {{ 'bad' if counts.errors else '' }}">
+    <div class="card-label">Chyby</div>
+    <div class="card-value">{{ counts.errors }}</div>
+  </div>
+</div>
+
+<h2>Posledních 10 zpráv</h2>
+<table class="msg-table">
+  <thead>
+    <tr><th>Čas</th><th>Směr</th><th>Odkud/komu</th><th>Předmět</th><th>Stav</th></tr>
+  </thead>
+  <tbody>
+    {% for m in recent %}
+    <tr class="{{ 'row-error' if m.status == 'error' else '' }}">
+      <td>{{ m.ts }}</td>
+      <td>{{ '📶→✉️' if m.direction == 'mesh_to_email' else '✉️→📶' }}</td>
+      <td>{{ m.peer }}</td>
+      <td>{{ m.subject }}</td>
+      <td>{{ '✅' if m.status == 'ok' else '⚠️ ' + (m.error or '') }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">Zatím žádné zprávy.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p><a href="{{ url_for('messages') }}">Zobrazit celou historii →</a></p>
+{% endblock %}

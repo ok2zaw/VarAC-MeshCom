@@ -1,0 +1,19 @@
+{
+  "mesh_node_ip": "192.168.1.50",
+  "mesh_udp_port": 1799,
+  "listen_ip": "0.0.0.0",
+  "mesh_group": "12345",
+  "smtp_host": "smtp.example.com",
+  "smtp_port": 587,
+  "smtp_user": "gateway@example.com",
+  "smtp_password": "changeme",
+  "smtp_use_tls": true,
+  "mail_from": "meshcom-gateway@example.com",
+  "mail_to": "you@example.com",
+  "maildir_new": "/home/pi/Maildir/new",
+  "poll_interval_seconds": 5,
+  "max_mesh_payload": 150,
+  "callsign": "OK2ZAW-10",
+  "web_username": "admin",
+  "web_password": "changeme"
+}

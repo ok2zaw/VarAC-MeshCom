@@ -1,0 +1,12 @@
+[Unit]
+Description=MeshCom Gateway web UI
+After=network.target
+
+[Service]
+WorkingDirectory=/home/pi/meshcom-gateway
+ExecStart=/usr/bin/python3 /home/pi/meshcom-gateway/webapp.py
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
