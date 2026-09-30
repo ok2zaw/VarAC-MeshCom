@@ -52,6 +52,8 @@ Web běží na portu `8899`.
 
 Upravte soubor `config.json` podle vaší sítě a SMTP/Maildir nastavení.
 
+Pro produkční nasazení je vhodné používat i soubor `.env` nebo proměnné prostředí. Projekt podporuje prefixed proměnné typu `MESHCOM_SMTP_HOST`, `MESHCOM_WEB_PASSWORD`, `MESHCOM_IMAP_HOST`, atd. Příklad najdete v `.env.example`.
+
 ## Poznámka
 
 Tento projekt je navržen jako gateway, ne jako veřejný mailserver. Pro produkční nasazení je doporučené:

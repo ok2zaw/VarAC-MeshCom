@@ -16,6 +16,7 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DB_PATH = os.path.join(BASE_DIR, "gateway.db")
 
 _config_lock = threading.Lock()
+_ENV_PREFIX = "MESHCOM_"
 
 DEFAULT_CONFIG = {
     "mesh_node_ip": "192.168.1.50",
@@ -45,6 +46,64 @@ DEFAULT_CONFIG = {
 }
 
 
+def _parse_env_value(raw: str):
+    value = raw.strip()
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    elif value.startswith("'") and value.endswith("'"):
+        value = value[1:-1]
+
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if lowered in {"yes", "no"}:
+        return lowered == "yes"
+    if value and value.isdigit():
+        return int(value)
+    try:
+        return int(value)
+    except ValueError:
+        return value
+
+
+def _normalize_config_key(raw_key: str) -> str:
+    key = raw_key.strip()
+    if key.upper().startswith(_ENV_PREFIX):
+        key = key[len(_ENV_PREFIX):]
+    return key.lower()
+
+
+def _read_dotenv(path: str | None = None) -> dict:
+    dotenv_path = path or os.path.join(BASE_DIR, ".env")
+    if not os.path.exists(dotenv_path):
+        return {}
+
+    overrides = {}
+    with open(dotenv_path, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            overrides[_normalize_config_key(key)] = value
+    return overrides
+
+
+def _env_overrides() -> dict:
+    overrides = {}
+    for key, value in os.environ.items():
+        if not key.startswith(_ENV_PREFIX):
+            continue
+        config_key = _normalize_config_key(key)
+        if config_key:
+            overrides[config_key] = _parse_env_value(value)
+    return overrides
+
+
 def load_config() -> dict:
     with _config_lock:
         if not os.path.exists(CONFIG_PATH):
@@ -52,8 +111,15 @@ def load_config() -> dict:
             return dict(DEFAULT_CONFIG)
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             cfg = json.load(f)
+
         merged = dict(DEFAULT_CONFIG)
         merged.update(cfg)
+
+        dotenv_cfg = _read_dotenv()
+        merged.update({k: _parse_env_value(v) for k, v in dotenv_cfg.items()})
+
+        env_cfg = _env_overrides()
+        merged.update(env_cfg)
         return merged
 
 

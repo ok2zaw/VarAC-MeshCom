@@ -51,6 +51,8 @@ pip install -r requirements.txt
 
 ## 5. Konfigurace
 
+Nejbezpečnější způsob je používat `.env` soubor s proměnnými `MESHCOM_*` a případně ponechat `config.json` pouze jako fallback. Příklad najdete v `.env.example`.
+
 Upravte soubor `config.json`:
 
 ```json
@@ -107,7 +109,7 @@ Web běží na portu 8899. Přístup je chráněn podle nastavení `web_username
 
 ## 7. Systémová služba (systemd)
 
-V adresáři `systemd/` jsou připravené service soubory. Upravte je podle vaší cesty a potom je aktivujte:
+V adresáři `systemd/` jsou připravené service soubory. Jsou nastavené tak, aby načítaly `.env` z adresáře projektu přes `EnvironmentFile`. Upravte je podle vaší cesty a potom je aktivujte:
 
 ```bash
 sudo cp systemd/meshcom-gateway.service /etc/systemd/system/

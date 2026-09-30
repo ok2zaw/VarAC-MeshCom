@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 WorkingDirectory=/home/pi/meshcom-gateway
+EnvironmentFile=-/home/pi/meshcom-gateway/.env
 ExecStart=/usr/bin/python3 /home/pi/meshcom-gateway/gateway.py
 Restart=always
 User=pi
