@@ -29,6 +29,12 @@ Podrobný návod pro Raspberry Pi / Debian je v souboru [INSTALL.md](INSTALL.md)
 Základní kroky:
 
 ```bash
+./setup_rpi.sh
+```
+
+Nebo ručně:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
