@@ -27,6 +27,7 @@ from flask import Flask, request, redirect, url_for, render_template, Response
 import common
 
 app = Flask(__name__)
+common.init_db()
 
 
 def validate_config_values(form_data, cfg):
@@ -163,5 +164,4 @@ def config_page():
 
 
 if __name__ == "__main__":
-    common.init_db()
     app.run(host="0.0.0.0", port=8899, debug=False)

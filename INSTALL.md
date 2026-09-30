@@ -35,10 +35,14 @@ chown -R pi:pi /home/pi/Maildir
 ## 3. Stažení projektu
 
 ```bash
-cd /opt
-sudo git clone https://github.com/ok2zaw/VarAC-MeshCom.git meshcom-gateway
-cd meshcom-gateway
+cd /home/pi
+git clone https://github.com/ok2zaw/VarAC-MeshCom.git meshcom-gateway
+cd /home/pi/meshcom-gateway
 ```
+
+Projekt instalujte pod uživatelem `pi`, protože obě systemd služby pod tímto
+uživatelem zapisují konfiguraci, SQLite databázi a Maildir. Pokud používáte
+jméno jiného účtu, upravte `User`, `Group` a cesty v obou souborech v `systemd/`.
 
 ## 4. Virtuální prostředí
 
@@ -109,16 +113,22 @@ Web běží na portu 8899. Přístup je chráněn podle nastavení `web_username
 
 ## 7. Systémová služba (systemd)
 
-V adresáři `systemd/` jsou připravené service soubory. Jsou nastavené tak, aby načítaly `.env` z adresáře projektu přes `EnvironmentFile`. Upravte je podle vaší cesty a potom je aktivujte:
+Soubory v `systemd/` předpokládají projekt v `/home/pi/meshcom-gateway` a
+virtuální prostředí vytvořené v předchozím kroku. Gateway běží jako samostatná
+služba; web používá produkční WSGI server Waitress, nikoli vývojový server Flask.
+Obě jednotky načítají volitelný `.env` soubor. Nainstalujte a aktivujte je:
 
 ```bash
-sudo cp systemd/meshcom-gateway.service /etc/systemd/system/
+sudo cp systemd/meshcom-gateway.service systemd/meshcom-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable meshcom-gateway
-sudo systemctl start meshcom-gateway
+sudo systemctl enable --now meshcom-gateway meshcom-web
+sudo systemctl status meshcom-gateway meshcom-web
 ```
 
-Pro webové rozhraní lze použít podobný service soubor nebo spouštět `webapp.py` přímo.
+Pro zobrazení průběžných logů použijte `sudo journalctl -u meshcom-gateway -u meshcom-web -f`.
+Webové rozhraní je dostupné na `http://<IP-Raspberry-Pi>:8899/`; ve výchozím
+stavu poslouchá na všech síťových rozhraních, proto nastavte silné heslo a
+přístup omezte na důvěryhodnou síť.
 
 ## 8. Varianta s externím SMTP a IMAP
 

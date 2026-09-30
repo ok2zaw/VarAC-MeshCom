@@ -1,13 +1,21 @@
 [Unit]
 Description=MeshCom Gateway web UI
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
+Type=simple
+User=pi
+Group=pi
 WorkingDirectory=/home/pi/meshcom-gateway
 EnvironmentFile=-/home/pi/meshcom-gateway/.env
-ExecStart=/usr/bin/python3 /home/pi/meshcom-gateway/webapp.py
-Restart=always
-User=pi
+ExecStart=/home/pi/meshcom-gateway/.venv/bin/waitress-serve --threads=4 --listen=0.0.0.0:8899 webapp:app
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target
