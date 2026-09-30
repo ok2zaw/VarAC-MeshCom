@@ -150,6 +150,20 @@ def archive_mail_file(src_path: str, archive_dir: str | None = None) -> str | No
     return destination_path
 
 
+def ensure_maildir_layout(maildir_root: str) -> dict:
+    root = maildir_root or os.path.join(BASE_DIR, "Maildir")
+    os.makedirs(root, exist_ok=True)
+    layout = {
+        "root": root,
+        "new": os.path.join(root, "new"),
+        "cur": os.path.join(root, "cur"),
+        "tmp": os.path.join(root, "tmp"),
+    }
+    for path in layout.values():
+        os.makedirs(path, exist_ok=True)
+    return layout
+
+
 # ------------------------------------------------------------------
 # Database
 # ------------------------------------------------------------------

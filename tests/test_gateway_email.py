@@ -50,6 +50,18 @@ class GatewayEmailTests(unittest.TestCase):
                 self.assertEqual(cfg["web_password"], "env-pass")
                 self.assertEqual(cfg["mesh_group"], "99999")
 
+    def test_ensure_maildir_layout_creates_required_directories(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            maildir_root = os.path.join(tmpdir, "Maildir")
+            result = common.ensure_maildir_layout(maildir_root)
+
+            self.assertEqual(result["new"], os.path.join(maildir_root, "new"))
+            self.assertEqual(result["cur"], os.path.join(maildir_root, "cur"))
+            self.assertEqual(result["tmp"], os.path.join(maildir_root, "tmp"))
+            self.assertTrue(os.path.isdir(result["new"]))
+            self.assertTrue(os.path.isdir(result["cur"]))
+            self.assertTrue(os.path.isdir(result["tmp"]))
+
     def test_long_email_is_split_and_attachments_are_ignored(self):
         body = "A" * 500
         msg = EmailMessage()

@@ -346,6 +346,10 @@ def heartbeat_loop():
 def main():
     common.init_db()
     cfg = common.load_config()
+    maildir_root = cfg.get("maildir_new")
+    if maildir_root:
+        maildir_root = os.path.dirname(maildir_root)
+        common.ensure_maildir_layout(maildir_root)
     log.info("Starting MeshCom <-> Email gateway (group %s, node %s)",
               cfg["mesh_group"], cfg["mesh_node_ip"])
 
