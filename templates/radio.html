@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}VarAC – MeshCom Gateway{% endblock %}
+{% block content %}
+{% set state_labels = {"active": "Běží", "activating": "Spouští se", "deactivating": "Zastavuje se", "inactive": "Neběží", "failed": "Chyba", "unknown": "Neznámý"} %}
+<h1>VarAC a HF modemy</h1>
+<p class="monitor-note">Programy běží jako uživatelské systemd jednotky účtu gateway; restart webu je nezastaví. VARA a VarAC potřebují přihlášený desktop, Mercury běží i bez něj. <a class="clear-filter" href="{{ url_for('radio') }}">Obnovit stav</a></p>
+
+{% if port_conflict %}
+<div class="flash error" role="alert">VARA i Mercury používají TCP port {{ mercury_port }}. Pro souběžný provoz nastavte Mercury jiný port, např. <code>-p 8400</code>.</div>
+{% endif %}
+
+<div class="cards">
+  {% for item in apps %}
+  {% set state = item.status.state %}
+  <div class="card {{ 'ok' if state == 'active' else 'bad' if state == 'failed' else '' }}">
+    <div class="card-label">{{ item.label }}</div>
+    <div class="card-value">{% if state == 'active' %}🟢{% elif state == 'failed' %}🔴{% else %}⚪{% endif %} {{ state_labels.get(state, state) }}</div>
+    <div class="card-sub">
+      {% if item.status.error %}{{ item.status.error }}
+      {% elif item.status.since %}od {{ item.status.since }}
+      {% else %}autostart {{ 'zapnutý, za ' ~ item.delay ~ ' s' if item.autostart else 'vypnutý' }}{% endif %}
+    </div>
+    <div class="radio-actions">
+      {% for action, text in [("start", "Spustit"), ("restart", "Restart"), ("stop", "Zastavit")] %}
+      <form method="post" action="{{ url_for('radio') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="app" value="{{ item.name }}">
+        <input type="hidden" name="action" value="{{ action }}">
+        <button type="submit"{% if action == 'stop' %} class="secondary"{% endif %}>{{ text }}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<form method="post" action="{{ url_for('radio') }}" class="config-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="save">
+
+  <fieldset>
+    <legend>Automatický start po přihlášení do desktopu</legend>
+    {% for item in apps %}
+    <label class="checkbox">
+      <input type="checkbox" name="radio_{{ item.name }}_autostart" {{ 'checked' if item.autostart }}>
+      Spouštět {{ item.label }}
+    </label>
+    <label>{{ item.label }} – zpoždění po přihlášení (s)
+      <input type="number" name="radio_{{ item.name }}_delay" value="{{ item.delay }}" min="0" max="600">
+    </label>
+    {% endfor %}
+    <p class="hint">Zpoždění se počítá od přihlášení. VarAC nastavte později než modem, aby se k němu mohl připojit. Položka autostartu {{ 'existuje' if autostart_present else 'zatím neexistuje' }}.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Programy</legend>
+    <label>VARA – cesta k .exe <span class="hint">(VARA HF nebo VARA FM)</span>
+      <input type="text" name="radio_vara_path" value="{{ cfg.radio_vara_path }}">
+    </label>
+    <label>VarAC – cesta k .exe
+      <input type="text" name="radio_varac_path" value="{{ cfg.radio_varac_path }}">
+    </label>
+    <label>Wine prefix
+      <input type="text" name="radio_wine_prefix" value="{{ cfg.radio_wine_prefix }}">
+    </label>
+    <label>Displej <span class="hint">(obvykle :0)</span>
+      <input type="text" name="radio_display" value="{{ cfg.radio_display }}">
+    </label>
+    <label>Mercury – program
+      <input type="text" name="radio_mercury_command" value="{{ cfg.radio_mercury_command }}">
+    </label>
+    <label>Mercury – parametry <span class="hint">(zvuk, PTT, port; aktuální port {{ mercury_port }})</span>
+      <input type="text" name="radio_mercury_args" value="{{ cfg.radio_mercury_args }}" placeholder="-x alsa -i plughw:1,0 -o plughw:1,0 -p 8400">
+    </label>
+  </fieldset>
+
+  <button type="submit">Uložit</button>
+</form>
+
+<h2>Poslední výpis programů</h2>
+{% for item in apps %}
+<details class="radio-log">
+  <summary>{{ item.label }}</summary>
+  <pre>{{ item.log or 'Žádný záznam v journalu.' }}</pre>
+</details>
+{% endfor %}
+{% endblock %}

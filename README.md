@@ -1,7 +1,8 @@
 # MeshCom Gateway
 
 Pythonová obousměrná gateway mezi MeshCom a e-mailem. Aktuální implementace
-komunikuje s MeshCom uzlem přes UDP/JSON; podporu VarAC ani VARA zatím nemá.
+komunikuje s MeshCom uzlem přes UDP/JSON; VARA, Mercury a VarAC umí spouštět,
+ale zprávy přes ně zatím nepředává.
 Přehled hotových funkcí a další práce je v [ROADMAP.md](ROADMAP.md), instalace
 na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 
@@ -28,6 +29,9 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	skupiny; délka se kontroluje a pokus se zaznamená do historie.
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
+- Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
+	VarAC, včetně automatického startu po přihlášení do desktopu se zpožděním
+	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
 - Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Konfigurace

@@ -98,6 +98,11 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(rows[0]["body"], "RF check")
         self.assertEqual(rows[0]["rssi"], -94)
 
+    def test_udp_packet_decoding_tolerates_terminator_and_bom(self):
+        payload = b'{"type": "pos", "src_type": "lora", "src": "OK1AAA-1"}'
+        for raw in (payload, payload + b"\x00", b"\xef\xbb\xbf" + payload + b"\r\n"):
+            self.assertEqual(gateway.decode_udp_packet(raw)["src"], "OK1AAA-1")
+
     def test_station_page_applies_inclusive_date_filter(self):
         with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
              patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \

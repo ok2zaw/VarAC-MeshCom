@@ -44,6 +44,18 @@ DEFAULT_CONFIG = {
     "callsign": "OK2ZAW-10",
     "web_username": "admin",
     "web_password": "changeme",
+    "radio_display": ":0",
+    "radio_wine_prefix": "/home/pi/.wine",
+    "radio_vara_path": "/home/pi/.wine/drive_c/VARA/VARA.exe",
+    "radio_vara_autostart": False,
+    "radio_vara_delay": 10,
+    "radio_mercury_command": "mercury",
+    "radio_mercury_args": "-x alsa -p 8400",
+    "radio_mercury_autostart": False,
+    "radio_mercury_delay": 10,
+    "radio_varac_path": "/home/pi/.wine/drive_c/VarAC/VarAC.exe",
+    "radio_varac_autostart": False,
+    "radio_varac_delay": 40,
 }
 
 

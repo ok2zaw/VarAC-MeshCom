@@ -95,6 +95,12 @@ def send_email(cfg: dict, subject: str, body: str) -> None:
 # mesh -> email
 # ---------------------------------------------------------------------
 
+def decode_udp_packet(data: bytes):
+    # Firmware buffers may carry a trailing NUL terminator, CR/LF or a BOM.
+    text = data.decode("utf-8", errors="replace").strip("\x00﻿ \t\r\n")
+    return json.loads(text)
+
+
 def udp_listener():
     cfg = common.load_config()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -117,7 +123,7 @@ def udp_listener():
         cfg = common.load_config()  # pick up live config changes (group, smtp, etc.)
 
         try:
-            packet = json.loads(data.decode("utf-8", errors="replace"))
+            packet = decode_udp_packet(data)
         except json.JSONDecodeError:
             update_udp_monitor("rx", peer, "neplatný JSON", "Datagram neobsahuje platný JSON.", count_datagram=False)
             continue

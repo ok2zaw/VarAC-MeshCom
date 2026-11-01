@@ -424,7 +424,7 @@ Nevýhody:
 Tato varianta není veřejný mailserver: veřejnou adresu a příjem z internetu
 nadále zajišťuje vlastní server. Raspberry používá jeho SMTP/IMAP rozhraní.
 
-## 11. VARA a VarAC na Raspberry Pi 5 (experimentální)
+## 11. VARA, Mercury a VarAC na Raspberry Pi 5 (experimentální)
 
 VARA (EA5HVK) i VarAC jsou programy pro Windows na platformě x86. Raspberry Pi 5
 má procesor ARM64, proto se spouštějí přes **Wine** (vrstva Windows API) a
@@ -610,39 +610,95 @@ Pro rádia s VOX nebo Digirig s PTT přes zvukovou kartu tento krok není nutný
 5. Nejprve ověřte příjem (dekódování beaconů na volací frekvenci VarAC) a
    teprve potom vysílání.
 
-### 11.9 Spouštěcí skript a automatický start po přihlášení
+### 11.9 Instalace modemu Mercury (volitelně)
 
-Vytvořte skript, který spustí VARA a po chvíli VarAC:
-
-```bash
-cat > ~/start-varac.sh <<'EOF'
-#!/bin/bash
-export BOX64_DYNAREC_STRONGMEM=1
-export MESA_GL_VERSION_OVERRIDE=3.2
-wine "$HOME/.wine/drive_c/VARA/VARA.exe" &
-sleep 20
-wine "$HOME/.wine/drive_c/VarAC/VarAC.exe" &
-EOF
-chmod +x ~/start-varac.sh
-```
-
-Automatický start po přihlášení do desktopu:
+[Mercury](https://github.com/Rhizomatica/mercury) je open-source HF modem
+projektu HERMES (Rhizomatica). Běží nativně na ARM64 Linuxu bez Wine a bez
+grafického prostředí a nabízí TCP rozhraní kompatibilní s VARA (ARQ port
+`8300`, data `8301`). Balíčky jsou připravené pro Debian 13 Trixie / aktuální
+Raspberry Pi OS arm64:
 
 ```bash
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/varac.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=VARA + VarAC
-Exec=/home/pi/start-varac.sh
-EOF
+wget -qO- https://debian.hermes.radio/hermes/hermes.key | gpg --dearmor \
+  | sudo tee /etc/apt/trusted.gpg.d/hermes.gpg > /dev/null
+echo 'deb [arch=arm64] http://debian.hermes.radio/hermes trixie main' \
+  | sudo tee /etc/apt/sources.list.d/hermes.list
+sudo apt update
+sudo apt install -y mercury
 ```
 
-Aby se aplikace spustily i po výpadku napájení, zapněte automatické přihlášení
-do desktopu (`sudo raspi-config` → *System Options* → *Boot / Auto Login* →
-*Desktop Autologin*).
+Na starším systému (Bookworm) Mercury přeložte ze zdrojů:
 
-### 11.10 Řešení problémů
+```bash
+sudo apt install -y build-essential pkg-config libasound2-dev libpulse-dev libhamlib-dev make git
+git clone https://github.com/Rhizomatica/mercury.git ~/mercury
+cd ~/mercury && make && sudo make install
+```
+
+Vypište zvuková zařízení a vyzkoušejte ruční spuštění (příklad: ALSA karta 1,
+PTT přes sériový port, ARQ port 8400):
+
+```bash
+mercury -z
+mercury -x alsa -i plughw:1,0 -o plughw:1,0 -P serial -A /dev/ttyUSB0 -p 8400
+```
+
+**Souběh s VARA:** Mercury i VARA mají výchozí port `8300`. Pokud mají běžet
+současně, nastavte Mercury jiný port (`-p 8400`). Obě aplikace navíc nemohou
+sdílet stejnou zvukovou kartu přes přímé ALSA zařízení `hw:`/`plughw:` –
+použijte dvě rozhraní, nebo PulseAudio/PipeWire (`-x pulse`). Vysílat může
+v jednu chvíli jen jeden modem.
+
+### 11.10 Ovládání z webu – záložka VarAC
+
+Záložka **VarAC** ve webovém rozhraní gateway spouští, zastavuje a restartuje
+VARA, Mercury a VarAC, zobrazuje jejich stav a poslední výpis a nastavuje
+automatický start po přihlášení do desktopu se zpožděním pro každý program
+zvlášť (např. VARA 10 s, Mercury 10 s, VarAC 40 s).
+
+Programy běží jako uživatelské systemd jednotky (`meshcom-radio-vara`,
+`meshcom-radio-mercury`, `meshcom-radio-varac` a sdílený
+`meshcom-radio-wineserver`). Restart nebo aktualizace webu je proto nezastaví.
+
+Jednorázová příprava:
+
+1. Zapněte automatické přihlášení do desktopu, jinak VARA a VarAC nemají
+   kam vykreslit okno: `sudo raspi-config` → *System Options* →
+   *Boot / Auto Login* → *Desktop Autologin*.
+2. Povolte uživatelský systemd i mimo přihlášení, aby web mohl spouštět
+   programy kdykoli:
+
+   ```bash
+   sudo loginctl enable-linger pi
+   ```
+
+3. Pokud jste dříve vytvořili ruční spouštěcí skript `~/start-varac.sh` a
+   položku `~/.config/autostart/varac.desktop`, smažte je, aby se programy
+   nespouštěly dvakrát:
+
+   ```bash
+   rm -f ~/start-varac.sh ~/.config/autostart/varac.desktop
+   ```
+
+4. Ve webu na záložce **VarAC** zkontrolujte cesty k `VARA.exe` a
+   `VarAC.exe`, parametry Mercury (zvuková karta, PTT, port) a displej
+   (obvykle `:0`). Po zaškrtnutí autostartu a uložení web sám vytvoří
+   `~/.config/autostart/meshcom-radio.desktop`; po odškrtnutí všech programů
+   ji smaže.
+
+Ruční kontrola z příkazové řádky:
+
+```bash
+systemctl --user list-units 'meshcom-radio-*'
+journalctl --user -u meshcom-radio-varac -n 50
+```
+
+> **Bezpečnost:** Záložka spouští programy pod účtem `pi`. Web proto
+> zpřístupněte jen v důvěryhodné síti se silným heslem. Spustit lze pouze
+> soubory `.exe` přes Wine a program `mercury`.
+
+### 11.11 Řešení problémů
+
 
 | Problém | Řešení |
 | --- | --- |
@@ -651,11 +707,15 @@ do desktopu (`sudo raspi-config` → *System Options* → *Boot / Auto Login* �
 | VARA nevidí zvukovou kartu | `arecord -l`, `aplay -l`; ve `winecfg` → *Audio* zvolte jiný ovladač; restartujte Wine |
 | VarAC hlásí chybějící .NET | znovu `winetricks -q dotnet48`, případně v čistém prefixu (`mv ~/.wine ~/.wine.bak`) |
 | PTT nefunguje | ověřte skupinu `dialout`, odkaz v `~/.wine/dosdevices/` a číslo COM portu ve VarAC |
+| Web hlásí „Uživatelský systemd neběží“ | `sudo loginctl enable-linger pi`, případně přihlášení do desktopu |
+| Program na záložce VarAC hned skončí (Chyba) | rozbalte jeho výpis na záložce, nebo `journalctl --user -u meshcom-radio-<program>` |
+| Okno VARA/VarAC se neobjeví | zkontrolujte přihlášený desktop a hodnotu Displej (`echo $DISPLAY` v terminálu desktopu) |
+| VarAC se nepřipojí k Mercury | port ve VarAC musí odpovídat `-p` v parametrech Mercury |
 | Vysoká teplota, nízký výkon | `vcgencmd measure_temp`, `vcgencmd get_throttled`; použijte aktivní chladič |
 
 Zátěž lze sledovat příkazem `htop`. Trvale přes 90 % CPU při příjmu znamená,
 že je potřeba vypnout vodopád, snížit šířku pásma VARA nebo zavřít jiné
 programy na desktopu.
 
-> **Poznámka:** Gateway (kapitoly 2–7) zatím s VarAC ani VARA neintegruje;
-> tato kapitola připravuje Raspberry Pi pro jejich souběžný provoz.
+> **Poznámka:** Gateway (kapitoly 2–7) zatím nepředává zprávy mezi MeshCom a
+> VarAC; záložka VarAC slouží jen ke spouštění a sledování programů.

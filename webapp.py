@@ -31,6 +31,7 @@ from flask import Flask, abort, flash, request, redirect, url_for, render_templa
 
 import common
 import gateway
+import radio_apps
 import update_manager
 
 app = Flask(__name__)
@@ -281,6 +282,102 @@ def config_page():
             saved = True
 
     return render_template("config.html", cfg=cfg, saved=saved, errors=errors)
+
+
+RADIO_TEXT_FIELDS = (
+    "radio_display", "radio_wine_prefix", "radio_vara_path",
+    "radio_mercury_command", "radio_mercury_args", "radio_varac_path",
+)
+
+
+def save_radio_settings(form_data, cfg):
+    new_cfg = dict(cfg)
+    errors = []
+    for key in RADIO_TEXT_FIELDS:
+        new_cfg[key] = str(form_data.get(key, cfg.get(key, ""))).strip()
+    for app_name, spec in radio_apps.APPS.items():
+        new_cfg[f"radio_{app_name}_autostart"] = form_data.get(f"radio_{app_name}_autostart") == "on"
+        raw_delay = form_data.get(f"radio_{app_name}_delay", "")
+        try:
+            delay = int(raw_delay)
+        except (TypeError, ValueError):
+            errors.append(f"{spec['label']}: zpoždění musí být celé číslo.")
+            continue
+        if not 0 <= delay <= radio_apps.MAX_DELAY_SECONDS:
+            errors.append(f"{spec['label']}: zpoždění musí být 0 až {radio_apps.MAX_DELAY_SECONDS} s.")
+            continue
+        new_cfg[f"radio_{app_name}_delay"] = delay
+
+    for key in ("radio_vara_path", "radio_varac_path"):
+        if new_cfg[key] and not new_cfg[key].lower().endswith(".exe"):
+            errors.append(f"{key}: cesta musí končit na .exe.")
+    if os.path.basename(new_cfg["radio_mercury_command"] or "mercury") != "mercury":
+        errors.append("radio_mercury_command: povolen je jen program mercury.")
+    return new_cfg, errors
+
+
+@app.route("/radio", methods=["GET", "POST"])
+@requires_auth
+def radio():
+    cfg = common.load_config()
+    if request.method == "POST":
+        require_csrf_token()
+        action = request.form.get("action")
+        if action == "save":
+            new_cfg, errors = save_radio_settings(request.form, cfg)
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+            else:
+                common.save_config(new_cfg)
+                try:
+                    present = radio_apps.sync_autostart_entry(new_cfg)
+                except OSError as exc:
+                    flash(f"Nastavení uloženo, ale autostart se nepodařilo zapsat: {exc}", "error")
+                else:
+                    flash("Nastavení uloženo; automatický start je "
+                          + ("zapnutý." if present else "vypnutý."), "success")
+        elif action in {"start", "stop", "restart"}:
+            app_name = request.form.get("app", "")
+            if app_name not in radio_apps.APPS:
+                abort(400, description="Neznámý program.")
+            label = radio_apps.APPS[app_name]["label"]
+            try:
+                if action == "start":
+                    started = radio_apps.start(app_name, cfg)
+                    flash(f"{label} spuštěn." if started else f"{label} už běží.", "success")
+                elif action == "stop":
+                    radio_apps.stop(app_name)
+                    flash(f"{label} zastaven.", "success")
+                else:
+                    radio_apps.restart(app_name, cfg)
+                    flash(f"{label} restartován.", "success")
+            except radio_apps.RadioError as exc:
+                flash(f"{label}: {exc}", "error")
+        else:
+            abort(400, description="Neznámá akce.")
+        return redirect(url_for("radio"))
+
+    apps = []
+    for app_name, spec in radio_apps.APPS.items():
+        apps.append({
+            "name": app_name,
+            "label": spec["label"],
+            "status": radio_apps.status(app_name),
+            "log": radio_apps.recent_log(app_name),
+            "autostart": bool(cfg.get(f"radio_{app_name}_autostart")),
+            "delay": cfg.get(f"radio_{app_name}_delay", 0),
+        })
+    mercury_port = radio_apps.mercury_port(cfg)
+    port_conflict = mercury_port == radio_apps.DEFAULT_MODEM_PORT and (
+        cfg.get("radio_vara_autostart") and cfg.get("radio_mercury_autostart")
+        or all(item["status"]["state"] == "active" for item in apps if item["name"] in {"vara", "mercury"})
+    )
+    return render_template(
+        "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
+        port_conflict=port_conflict,
+        autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
+    )
 
 
 @app.route("/updates", methods=["GET", "POST"])

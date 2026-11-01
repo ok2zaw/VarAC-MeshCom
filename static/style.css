@@ -169,6 +169,26 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .update-details dd { margin: 0; overflow-wrap: anywhere; }
 .update-result .flash { margin: 0 0 1rem; }
 
+.radio-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.radio-actions button {
+  min-height: 28px;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.radio-actions button:hover { background: var(--accent-hover); }
+.radio-actions button.secondary { background: transparent; color: var(--accent-text); }
+.radio-actions button.secondary:hover { background: var(--fill-muted); }
+.config-form p.hint { margin: 0; font-size: 11px; }
+.radio-log { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
+.radio-log summary { padding: 6px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
+.radio-log pre { margin: 0; padding: 8px 10px; overflow-x: auto; border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 .station-filter {
   display: flex;
   align-items: end;
