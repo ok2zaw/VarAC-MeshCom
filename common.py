@@ -199,6 +199,18 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS udp_activity (
+                direction TEXT PRIMARY KEY,
+                datagrams INTEGER NOT NULL DEFAULT 0,
+                last_at REAL,
+                last_peer TEXT,
+                last_status TEXT,
+                last_error TEXT
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -249,6 +261,49 @@ def count_messages() -> dict:
             "email_to_mesh": email_to_mesh,
             "errors": errors,
         }
+    finally:
+        conn.close()
+
+
+def record_udp_activity(direction: str, peer: str = None, status: str = "ok",
+                        error: str = None, count_datagram: bool = True) -> None:
+    if direction not in {"rx", "tx"}:
+        raise ValueError("direction must be 'rx' or 'tx'")
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO udp_activity "
+            "(direction, datagrams, last_at, last_peer, last_status, last_error) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(direction) DO UPDATE SET "
+            "datagrams=udp_activity.datagrams + excluded.datagrams, "
+            "last_at=excluded.last_at, last_peer=excluded.last_peer, "
+            "last_status=excluded.last_status, last_error=excluded.last_error",
+            (direction, int(count_datagram), time.time(), peer, status, error),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_udp_activity() -> dict:
+    result = {
+        direction: {
+            "datagrams": 0,
+            "last_at": None,
+            "last_peer": None,
+            "last_status": None,
+            "last_error": None,
+        }
+        for direction in ("rx", "tx")
+    }
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM udp_activity").fetchall()
+        for row in rows:
+            result[row["direction"]] = dict(row)
+        return result
     finally:
         conn.close()
 

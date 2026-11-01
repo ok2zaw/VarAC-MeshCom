@@ -1,72 +1,51 @@
 # MeshCom Gateway
 
-Jednoduchý Python gateway mezi MeshCom a e-mailem.
+Pythonová obousměrná gateway mezi MeshCom a e-mailem. Aktuální implementace
+komunikuje s MeshCom uzlem přes UDP/JSON; podporu VarAC ani VARA zatím nemá.
+Přehled hotových funkcí a další práce je v [ROADMAP.md](ROADMAP.md), instalace
+na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 
-## Funkce
+## Co projekt umí
 
-- příjem MeshCom UDP zpráv a odeslání přes SMTP
-- kontrola nových e-mailů v Maildir/new
-- přeposílání e-mailů do MeshCom skupiny
-- rozdělení dlouhých e-mailů na více MeshCom zpráv
-- ignorování příloh v obsahu zprávy, pouze název a typ přílohy
-- webové rozhraní pro status, historii a konfiguraci
-- SQLite databáze pro záznam zpráv a heartbeat
-
-## Struktura projektu
-
-- `gateway.py` – daemon pro MeshCom a Maildir
-- `webapp.py` – Flask web UI
-- `common.py` – konfigurace a database helper
-- `config.json` – nastavení projektu
-- `templates/` – HTML šablony
-- `static/` – CSS
-- `systemd/` – service soubory pro Linux
-
-## Instalace
-
-Podrobný návod pro Raspberry Pi / Debian je v souboru [INSTALL.md](INSTALL.md).
-
-Základní kroky:
-
-```bash
-./setup_rpi.sh
-```
-
-Nebo ručně:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Spuštění
-
-```bash
-python3 gateway.py
-```
-
-Pro web rozhraní:
-
-```bash
-python3 webapp.py
-```
-
-Web běží na portu `8899`.
+- Přijímat zprávy z nakonfigurované MeshCom skupiny a odesílat je přes SMTP.
+- Načítat e-maily z `Maildir/new`; volitelně stahovat nepřečtené zprávy přes IMAP.
+- Převádět e-maily na MeshCom zprávy, dlouhé texty rozdělit podle limitu a
+	uvést názvy příloh bez odesílání jejich obsahu.
+- Archivovat úspěšně zpracované e-maily do `Maildir/cur`.
+- Zobrazit stav gateway, historii a konfiguraci ve webovém rozhraní.
+- Sledovat počet UDP datagramů RX/TX, čas a protistranu poslední události a
+	poslední výsledek; stavová stránka se obnovuje každých 10 sekund.
+- Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Konfigurace
 
-Upravte soubor `config.json` podle vaší sítě a SMTP/Maildir nastavení.
+Konfigurace se skládá z výchozích hodnot, `config.json`, volitelného `.env` a
+proměnných prostředí `MESHCOM_*`; při konfliktu mají přednost proměnné prostředí.
+Příklad proměnných je v [`.env.example`](.env.example). Formulář webu ukládá do
+`config.json`, takže hodnoty přepsané v `.env` nebo prostředí se tím nezmění.
 
-Pro produkční nasazení je vhodné používat i soubor `.env` nebo proměnné prostředí. Projekt podporuje prefixed proměnné typu `MESHCOM_SMTP_HOST`, `MESHCOM_WEB_PASSWORD`, `MESHCOM_IMAP_HOST`, atd. Příklad najdete v `.env.example`.
+Webové rozhraní používá HTTP Basic Auth, pokud je nastavené webové heslo. V
+produkci jej zpřístupněte pouze v důvěryhodné síti nebo za odpovídající HTTPS
+proxy a hesla neukládejte do Gitu.
 
-## Poznámka
+## Spuštění
 
-Tento projekt je navržen jako gateway, ne jako veřejný mailserver. Pro produkční nasazení je doporučené:
-- používat externí SMTP/IMAP backend
-- neprovozovat veřejný MTA na Raspberry Pi
-- uložit hesla do zabezpečeného úložiště nebo environment proměnných
-- nastavit Maildir/cur pro archivaci zpracovaných e-mailů
+Podrobné kroky instalace a nasazení přes systemd jsou v [INSTALL.md](INSTALL.md).
+Pro ruční spuštění po instalaci závislostí:
 
-Volitelně lze přidat lokální Postfix/Dovecot/Roundcube, ale pro MeshCom bridge je jednodušší a bezpečnější externí mailová infrastruktura.
+```bash
+python3 gateway.py
+python3 webapp.py
+```
+
+Webové rozhraní poslouchá na portu `8899`. V produkci se používá systemd a
+Waitress; obě služby se po chybovém ukončení automaticky spouštějí znovu.
+
+## Struktura
+
+- `gateway.py` – UDP, SMTP, Maildir a volitelné IMAP zpracování
+- `webapp.py` – Flask webové rozhraní a validace webového formuláře
+- `common.py` – konfigurace, SQLite, Maildir a heartbeat
+- `templates/`, `static/` – šablony a styly webu
+- `systemd/` – produkční jednotky pro gateway a web
 

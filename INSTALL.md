@@ -1,6 +1,6 @@
 # Instalace a provoz MeshCom Gateway na Raspberry Pi / Debian
 
-Tento projekt je navržen jako hranolový gateway mezi MeshCom a e-mailem. Důraz je kladen na jednoduchou a bezpečnou architekturu:
+Tento projekt je navržen jako obousměrná gateway mezi MeshCom a e-mailem. Důraz je kladen na jednoduchou a bezpečnou architekturu:
 
 - MeshCom komunikuje přes UDP na lokální síti
 - Raspberry Pi přebírá zprávy a přeposílá je přes externí SMTP server

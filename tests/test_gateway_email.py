@@ -10,6 +10,23 @@ import webapp
 
 
 class GatewayEmailTests(unittest.TestCase):
+    def test_udp_monitor_tracks_datagrams_and_latest_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database_path = os.path.join(tmpdir, "gateway.db")
+            with patch.object(common, "DB_PATH", database_path):
+                common.init_db()
+                common.record_udp_activity("rx", "192.168.1.20:1799", "MeshCom zpráva")
+                common.record_udp_activity("rx", "192.168.1.21:1799", "neplatný JSON")
+                common.record_udp_activity("tx", "192.168.1.50:1799", "chyba", "Network unreachable", count_datagram=False)
+
+                activity = common.get_udp_activity()
+
+        self.assertEqual(activity["rx"]["datagrams"], 2)
+        self.assertEqual(activity["rx"]["last_peer"], "192.168.1.21:1799")
+        self.assertEqual(activity["rx"]["last_status"], "neplatný JSON")
+        self.assertEqual(activity["tx"]["datagrams"], 0)
+        self.assertEqual(activity["tx"]["last_error"], "Network unreachable")
+
     def test_imap_settings_are_available_and_local_queue_writes_messages(self):
         cfg = {
             "imap_host": "imap.example.com",

@@ -21,6 +21,7 @@ import os
 import re
 import smtplib
 import socket
+import sqlite3
 import threading
 import time
 import uuid
@@ -48,16 +49,31 @@ def next_msg_id(callsign: str) -> str:
     return f"{callsign.replace('-', '')[:6]}{n:03d}"
 
 
+def update_udp_monitor(direction: str, peer: str = None, status: str = "ok",
+                       error: str = None, count_datagram: bool = True) -> None:
+    try:
+        common.record_udp_activity(direction, peer, status, error, count_datagram)
+    except sqlite3.Error as exc:
+        log.warning("Could not update UDP monitor: %s", exc)
+
+
 def send_udp_message(cfg: dict, dst: str, text: str) -> None:
     text = text[: cfg["max_mesh_payload"]]
     payload = {"type": "msg", "dst": dst, "msg": text}
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    peer = f"{cfg['mesh_node_ip']}:{cfg['mesh_udp_port']}"
+    sock = None
     try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(data, (cfg["mesh_node_ip"], cfg["mesh_udp_port"]))
+        update_udp_monitor("tx", peer, "odesláno")
         log.info("Sent to mesh (dst=%s): %s", dst, text)
+    except OSError as exc:
+        update_udp_monitor("tx", peer, "chyba", str(exc), count_datagram=False)
+        raise
     finally:
-        sock.close()
+        if sock is not None:
+            sock.close()
 
 
 def send_email(cfg: dict, subject: str, body: str) -> None:
@@ -93,22 +109,33 @@ def udp_listener():
             continue
         except OSError as e:
             log.error("UDP recv error: %s", e)
+            update_udp_monitor("rx", status="chyba", error=str(e), count_datagram=False)
             continue
 
+        peer = f"{addr[0]}:{addr[1]}"
+        update_udp_monitor("rx", peer, "přijato")
         cfg = common.load_config()  # pick up live config changes (group, smtp, etc.)
 
         try:
             packet = json.loads(data.decode("utf-8", errors="replace"))
         except json.JSONDecodeError:
+            update_udp_monitor("rx", peer, "neplatný JSON", "Datagram neobsahuje platný JSON.", count_datagram=False)
+            continue
+
+        if not isinstance(packet, dict):
+            update_udp_monitor("rx", peer, "neplatná struktura", "JSON paket není objekt.", count_datagram=False)
             continue
 
         if packet.get("type") != "msg":
+            update_udp_monitor("rx", peer, "ignorován jiný typ", count_datagram=False)
             continue  # ignore pos/tele packets
 
         dst = str(packet.get("dst", ""))
         if dst != str(cfg["mesh_group"]):
+            update_udp_monitor("rx", peer, "ignorována jiná skupina", count_datagram=False)
             continue
 
+        update_udp_monitor("rx", peer, "MeshCom zpráva", count_datagram=False)
         src = packet.get("src", "unknown")
         text = packet.get("msg", "")
         log.info("Mesh message from %s in group %s: %s", src, dst, text)

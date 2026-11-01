@@ -91,14 +91,17 @@ def requires_auth(f):
 @requires_auth
 def status():
     cfg = common.load_config()
+    now = time.time()
     hb = common.get_heartbeat("gateway")
-    alive = hb is not None and (time.time() - hb) < 30
-    age = round(time.time() - hb) if hb else None
+    alive = hb is not None and (now - hb) < 30
+    age = round(now - hb) if hb else None
     counts = common.count_messages()
     recent = common.get_recent_messages(limit=10)
+    udp = common.get_udp_activity()
     return render_template(
         "status.html",
         cfg=cfg, alive=alive, age=age, counts=counts, recent=recent,
+        udp=udp, now=now,
     )
 
 

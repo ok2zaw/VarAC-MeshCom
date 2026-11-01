@@ -4,6 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}MeshCom Gateway{% endblock %}</title>
+{% block head_extra %}{% endblock %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@500;600&family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  try {
+    const savedTheme = localStorage.getItem("bandMagicTheme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      document.documentElement.dataset.theme = savedTheme;
+    }
+  } catch (error) {
+    document.documentElement.dataset.theme = "light";
+  }
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -12,9 +26,29 @@
   <a href="{{ url_for('status') }}">Stav</a>
   <a href="{{ url_for('messages') }}">Zprávy</a>
   <a href="{{ url_for('config_page') }}">Nastavení</a>
+  <button class="theme-toggle" type="button" aria-pressed="false">Tmavý režim</button>
 </nav>
 <main>
 {% block content %}{% endblock %}
 </main>
+<script>
+  const themeToggle = document.querySelector(".theme-toggle");
+  const applyTheme = (theme) => {
+    document.documentElement.dataset.theme = theme;
+    themeToggle.textContent = theme === "dark" ? "Světlý režim" : "Tmavý režim";
+    themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  };
+
+  applyTheme(document.documentElement.dataset.theme || "light");
+  themeToggle.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    try {
+      localStorage.setItem("bandMagicTheme", nextTheme);
+      applyTheme(nextTheme);
+    } catch (error) {
+      applyTheme("light");
+    }
+  });
+</script>
 </body>
 </html>

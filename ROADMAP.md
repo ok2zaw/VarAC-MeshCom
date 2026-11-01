@@ -1,46 +1,73 @@
-# Roadmap a připravované úpravy
+# Stav projektu a roadmapa
 
-## Hotové
+Tento soubor je hlavním přehledem implementovaného stavu a další práce.
+Obecný popis funkcí a spuštění je v [README.md](README.md); instalační postup
+pro Raspberry Pi/Debian je v [INSTALL.md](INSTALL.md).
 
-- základní MeshCom <-> email gateway
-- konfigurace v `config.json`
-- webové rozhraní pro stav a historii
-- logování do SQLite
-- heartbeat pro kontrolu běhu démona
-- rozdělování dlouhých e-mailů na více MeshCom zpráv
-- ignorování příloh v textu zprávy, pouze název a typ přílohy
-- archivace zpracovaných e-mailů z `Maildir/new` do `Maildir/cur`
-- základní dokumentace v `README.md`
+## Aktuální stav
 
-## Plánované úpravy
+Projekt je funkční základní MeshCom–e-mail gateway. MeshCom část používá UDP
+protokol s JSON zprávami; výchozí port je `1799`.
 
-### 1) Bezpečnější konfigurace
-- přesun citlivých hodnot do proměnných prostředí
-- podpora `.env` souboru pro SMTP heslo a webové heslo
-- validace vstupů z konfigurace
+### Implementováno
 
-### 2) Lepší Maildir a zpracování pošty
-- deduplikace zpracovaných e-mailů
-- lepší kontrola, zda soubor ještě nebyl zpracován
-- rozlišování `new` / `cur` / `tmp` podle Maildir standardu
-- robustnější parsing HTML a multipart e-mailů
+- Příjem zpráv z nakonfigurované MeshCom skupiny a jejich odesílání přes SMTP.
+- Příjem e-mailů z `Maildir/new` a jejich odeslání do MeshCom skupiny.
+- Volitelné načítání nepřečtených zpráv přes IMAP do Maildir fronty.
+- Rozdělování dlouhých zpráv podle limitu MeshCom payloadu; obsah příloh se
+	neposílá, jejich názvy či typy se mohou uvést v textu.
+- Archivace úspěšně odeslaných e-mailů do `Maildir/cur`.
+- Konfigurace přes výchozí hodnoty, `config.json`, `.env` a `MESHCOM_*`
+	proměnné prostředí, v tomto pořadí priority.
+- Základní validace číselných hodnot a návazností SMTP/IMAP ve webovém formuláři.
+- Webové stránky pro stav, stránkovanou historii a úpravu konfigurace; volitelná
+	ochrana HTTP Basic Auth.
+- UDP monitor na stavové stránce: počty RX/TX, poslední protistrana a výsledek;
+	stránka se obnovuje každých 10 sekund. Obsah paketů se neukládá.
+- SQLite historie zpráv a chyb, heartbeat gateway a systemd služby pro gateway
+	i web. Systemd restartuje proces po chybovém ukončení.
+- Základní testy UDP monitoru, převodu zpráv, Maildir, konfigurace a validace
+	formuláře.
 
-### 3) Stabilita a monitoring
-- lepší logování chyb do souboru
-- watchdog pro restart při pádu démona
-- rozšíření status stránky o další diagnostiku
-- jednoduché alarmy při chybách SMTP/UDP
+### Zatím mimo rozsah
 
-### 4) Web a správa
-- přidání odkazu na konfiguraci a události
-- zobrazení posledních chyb v web UI
-- možnost ručního opětovného zpracování záznamů
+- Integrace VarAC ani VARA není implementována.
+- Projekt nezajišťuje plný poštovní server; Postfix/Dovecot/Roundcube jsou pouze
+	volitelné externí komponenty, ne součást gateway.
 
-### 5) Integrace s mailovou infrastruktorou
-- Postfix + Dovecot + Roundcube setup na Debian/Raspberry Pi
-- možnost provozu s lokálním mailserverem
-- přidání lokální správy mailových účtů a Maildir
+## Další práce
 
-## Dílčí poznámka
+### Priorita 1: upřesnit zadání VarAC/VARA
 
-Tento projekt je v současné době funkční jako jednoduchý gateway pro konkrétní provozní scénář. Dále se plánuje přidat spolehlivost, lepší administraci a snadnější nasazení na Raspberry Pi a Debian.
+Zatím jde o požadavek k definování, ne o naplánovanou implementaci. Před návrhem
+řešení je potřeba rozhodnout:
+
+- **Potvrzeno:** VarAC a VARA mají běžet na stejném počítači jako gateway.
+- **Otevřeno:** směr toku zpráv; bude upřesněn později.
+- Jakou přesnou roli má VARA modem v požadovaném scénáři.
+- Rozhraní, které má být použito, a dostupnost/konfigurace VarAC a VARA na cílovém
+	počítači; operační systém zatím není určen.
+- Pravidla pro adresáty/skupiny, identitu odesílatele, délku a dělení zpráv.
+- Chování při odpojení, opakování, duplicitách a chybách.
+- Jaké provozní záznamy, diagnostiku a testovací prostředí jsou požadované.
+
+Za implementované bude možné považovat až řešení s dohodnutými akceptačními
+kritérii pro oba směry toku, chybové stavy a konfiguraci.
+
+### Priorita 2: spolehlivost pošty
+
+- Zabránit ztrátě nebo dvojímu zpracování e-mailu po restartu procesu.
+- Zpřesnit správu stavů Maildir a zpracování HTML/multipart zpráv.
+- Přidat testy obnovy po chybě během odesílání a archivace.
+
+### Priorita 3: diagnostika a správa
+
+- Zobrazit poslední chyby SMTP/IMAP a podrobnější diagnostiku ve webovém rozhraní;
+	poslední stav UDP už monitor zobrazuje.
+- Rozpoznat zamrzlý proces, nejen proces ukončený chybou; doplnit provozní alarmy.
+- Zvážit bezpečné ruční opakování neúspěšně zpracované zprávy.
+
+### Nižší priorita: lokální poštovní infrastruktura
+
+- Dokumentace nebo automatizace volitelného Postfix/Dovecot nasazení.
+- Správa lokálních poštovních účtů není součástí aktuální gateway.

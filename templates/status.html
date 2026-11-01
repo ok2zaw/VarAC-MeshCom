@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Stav – MeshCom Gateway{% endblock %}
+{% block head_extra %}<meta http-equiv="refresh" content="10">{% endblock %}
 {% block content %}
 <h1>Stav gateway</h1>
 
@@ -34,7 +35,33 @@
     <div class="card-label">Chyby</div>
     <div class="card-value">{{ counts.errors }}</div>
   </div>
+
+  <div class="card {{ 'bad' if udp.rx.last_status == 'chyba' else '' }}">
+    <div class="card-label">UDP příjem</div>
+    <div class="card-value">{{ udp.rx.datagrams }} datagramů</div>
+    <div class="card-sub">
+      {% if udp.rx.last_at %}
+        naposledy před {{ (now - udp.rx.last_at)|int }} s z {{ udp.rx.last_peer or 'neznámého uzlu' }}
+        · {{ udp.rx.last_status }}
+      {% else %}Zatím žádný přijatý datagram{% endif %}
+    </div>
+    {% if udp.rx.last_error %}<div class="card-sub">{{ udp.rx.last_error }}</div>{% endif %}
+  </div>
+
+  <div class="card {{ 'bad' if udp.tx.last_status == 'chyba' else '' }}">
+    <div class="card-label">UDP odeslání</div>
+    <div class="card-value">{{ udp.tx.datagrams }} datagramů</div>
+    <div class="card-sub">
+      {% if udp.tx.last_at %}
+        naposledy před {{ (now - udp.tx.last_at)|int }} s na {{ udp.tx.last_peer or 'neznámý uzel' }}
+        · {{ udp.tx.last_status }}
+      {% else %}Zatím žádný úspěšně odeslaný datagram{% endif %}
+    </div>
+    {% if udp.tx.last_error %}<div class="card-sub">{{ udp.tx.last_error }}</div>{% endif %}
+  </div>
 </div>
+
+<p class="monitor-note">Stránka se obnovuje každých 10 sekund. UDP nemá stav spojení; úspěšné lokální odeslání nepotvrzuje přijetí MeshCom uzlem.</p>
 
 <h2>Posledních 10 zpráv</h2>
 <table class="msg-table">
