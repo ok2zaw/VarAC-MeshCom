@@ -57,6 +57,8 @@ class KissServer(Thread):
         while True:
             self.connection = None
             self.connection, client_address = self.socket.accept()
+            # KISS frames are small; do not let Nagle hold them back.
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             parser.reset()
             logf("KISS-Server: Accepted Connection from %s" % client_address[0])
             while True:
@@ -82,7 +84,8 @@ class KissServer(Thread):
             decoded_data = KissHelper.decode_kiss_AX25(frame)
         #logf("Decapsulated Kiss Frame :"+ repr(decoded_data))
 
-        self.txQueue.put(decoded_data, block=False)
+        if decoded_data:
+            self.txQueue.put(decoded_data, block=False)
 
     def __del__(self):
         self.socket.close()

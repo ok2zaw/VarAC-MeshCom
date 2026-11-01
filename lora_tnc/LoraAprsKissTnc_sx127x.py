@@ -17,7 +17,10 @@ import datetime
 import time
 import config
 import sys
-from asyncio import QueueEmpty
+import math
+import random
+import threading
+from queue import Empty
 import traceback
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.absolute()))
@@ -59,6 +62,9 @@ class LoraAprsKissTnc(LoRa):
     queue = None
     server = None
 
+    TX_TIMEOUT_MARGIN = 2.0       # s added to the computed airtime
+    CHANNEL_BUSY_MAX_WAIT = 15.0  # s of carrier sense before sending anyway
+
     # init has LoRa APRS default config settings - might be initialized different when creating object with parameters
     def __init__(self, queue, server, frequency=433775000, preamble=8, spreadingFactor=12, bandwidth=BW.BW125,
                  codingrate=5, appendSignalReport = True, paSelect = 1, outputPower = 15, sync_word = 0x12, verbose=False):
@@ -69,6 +75,12 @@ class LoraAprsKissTnc(LoRa):
            time.sleep(4)
 
         BOARD.setup()
+
+        # SPI is used from the main loop and from the GPIO interrupt thread.
+        self.radio_lock = threading.RLock()
+        self.tx_idle = threading.Event()
+        self.tx_idle.set()
+        self.tx_timeout = self.TX_TIMEOUT_MARGIN
 
         logf("LoRa radio initialized. Waiting for LoRa Spots...")
         if config.disp_en:
@@ -98,7 +110,14 @@ class LoraAprsKissTnc(LoRa):
         }
 
         self.set_bw(bw[bandwidth])
-        self.set_low_data_rate_optim(True)
+        # Kept always on as in the original firmware, so stations running it
+        # stay compatible (both sides must use the same setting).
+        self.sf = spreadingFactor
+        self.bandwidth_hz = bandwidth
+        self.codingrate = codingrate
+        self.preamble_symbols = preamble
+        self.low_data_rate_optim = True
+        self.set_low_data_rate_optim(self.low_data_rate_optim)
 
         CR = {
         5 : CODING_RATE.CR4_5,
@@ -121,80 +140,119 @@ class LoraAprsKissTnc(LoRa):
         self.set_mode(MODE.RXCONT)
         #self.set_mode(MODE.SLEEP)
 
+    def airtime(self, length):
+        """LoRa time on air in seconds (Semtech AN1200.13, explicit header, CRC on)."""
+        symbol_time = (2 ** self.sf) / self.bandwidth_hz
+        divisor = 4 * (self.sf - (2 if self.low_data_rate_optim else 0))
+        payload_symbols = 8 + max(math.ceil((8 * length - 4 * self.sf + 28 + 16) / divisor) * self.codingrate, 0)
+        return (self.preamble_symbols + 4.25 + payload_symbols) * symbol_time
+
     def startListening(self):
+        # Frames are sent as soon as they arrive from KISS (the original
+        # polled the queue every 3 s, which delayed every frame and allowed
+        # only one frame per 3 s).
         try:
             while True:
-                # only transmit if no signal is detected to avoid collisions
-                if not self.get_modem_status()["signal_detected"]:
-                    # print("RSSI: %idBm" % lora.get_rssi_value())
-                    # FIXME: Add noise floor measurement for telemetry
-                    if not self.queue.empty():
-                        try:
-                            data = self.queue.get(block=False)
-                            #if self.aprs_data_type(data) == self.DATA_TYPE_THIRD_PARTY:
-                                # remove third party thing
-                                #data = data[data.find(self.DATA_TYPE_THIRD_PARTY) + 1:]
-                            if config.TX_OE_Style:
-                                data = self.LORA_APRS_HEADER + data
-                                logf("LoRa TX OE Syle packet: " + repr(data))
-                                if config.disp_en:
-                                   lcd("LoRa TX OE Syle packet: " + repr(data))
-                            else:
-                                logf("LoRa TX Standard AX25 packet: " + repr(data))
-                                if config.disp_en:
-                                   lcd("LoRa TX Standard AX25 packet: " + repr(data))
-
-                            self.transmit(data)
-                        except QueueEmpty:
-                            pass
-
-                time.sleep(3.00)
+                try:
+                    data = self.queue.get(timeout=0.5)
+                except Empty:
+                    continue
+                if not data:
+                    continue
+                try:
+                    if config.TX_OE_Style:
+                        data = self.LORA_APRS_HEADER + data
+                        logf("LoRa TX OE Syle packet: " + repr(data))
+                        if config.disp_en:
+                           lcd("LoRa TX OE Syle packet: " + repr(data))
+                    else:
+                        logf("LoRa TX Standard AX25 packet: " + repr(data))
+                        if config.disp_en:
+                           lcd("LoRa TX Standard AX25 packet: " + repr(data))
+                    self.wait_for_tx_idle()
+                    self.wait_for_clear_channel()
+                    self.transmit(data)
+                except Exception:
+                    # one bad frame must not stop the TNC
+                    logf("TX failed: " + traceback.format_exc())
         except KeyboardInterrupt:
             logf("Keyboard Interrupt received. Exiting...")
             if config.disp_en:
                lcd("Keyboard Interrupt received. Exiting...")
             BOARD.teardown()
 
-    def on_rx_done(self):
-        payload = self.read_payload(nocheck=True)
-        if not payload:
-            logf("No Payload!")
+    def wait_for_tx_idle(self):
+        """Wait until the previous frame left the radio; writing the FIFO
+        during TX would corrupt it."""
+        if self.tx_idle.wait(self.tx_timeout):
             return
-        rssi = self.get_pkt_rssi_value()
-        snr = self.get_pkt_snr_value()
+        logf("TX DONE not received in %.1f s, returning radio to RX" % self.tx_timeout)
+        with self.radio_lock:
+            self.clear_irq_flags(TxDone=1)
+            self.set_dio_mapping([0] * 6)
+            self.reset_ptr_rx()
+            self.set_mode(MODE.RXCONT)
+        self.tx_idle.set()
+
+    def wait_for_clear_channel(self):
+        """Carrier sense: back off for a short random time while a LoRa
+        signal is being received."""
+        deadline = time.monotonic() + self.CHANNEL_BUSY_MAX_WAIT
+        while time.monotonic() < deadline:
+            with self.radio_lock:
+                busy = self.get_modem_status()["signal_detected"]
+            if not busy:
+                return
+            time.sleep(random.uniform(0.05, 0.3))
+        logf("Channel busy for %.0f s, transmitting anyway" % self.CHANNEL_BUSY_MAX_WAIT)
+
+    def on_rx_done(self):
+        data = None
+        with self.radio_lock:
+            try:
+                flags = self.get_irq_flags()
+                payload = self.read_payload(nocheck=True)
+                if any([flags[s] for s in ['crc_error', 'rx_timeout']]):
+                    logf("Receive Error, discarding frame.")
+                elif not payload:
+                    logf("No Payload!")
+                else:
+                    data = bytes(payload)
+                    rssi = self.get_pkt_rssi_value()
+                    snr = self.get_pkt_snr_value()
+            finally:
+                # Always clear the flags and re-arm RX; otherwise DIO0 stays
+                # high and no further RX interrupt (rising edge) would come.
+                self.clear_irq_flags(RxDone=1, PayloadCrcError=1, RxTimeout=1, ValidHeader=1)
+                self.reset_ptr_rx()
+                self.set_mode(MODE.RXCONT)
+        if data is None:
+            return
         signalreport = "Level:"+str(rssi)+" dBm, SNR:"+str(snr)+"dB"
-        data = bytes(payload)
         logf("LoRa RX[%idBm/%.2fdB, %ibytes]: %s" %(rssi, snr, len(data), repr(data)))
         if config.disp_en:
            lcd("LoRa RX[RSSI=%idBm, SNR=%idB, %iBytes]: %s" %(rssi, snr, len(data), repr(data)))
-
-        flags = self.get_irq_flags()
-        if any([flags[s] for s in ['crc_error', 'rx_timeout']]):
-            logf("Receive Error, discarding frame.")
-            # print(self.get_irq_flags())
-            self.clear_irq_flags(RxDone=1, PayloadCrcError=1, RxTimeout=1)  # clear rxdone IRQ flag
-            self.reset_ptr_rx()
-            self.set_mode(MODE.RXCONT)
-            return
-
         if self.server:
             self.server.send(data, signalreport)
-        self.clear_irq_flags(RxDone=1)  # clear rxdone IRQ flag
-        self.reset_ptr_rx()
-        self.set_mode(MODE.RXCONT)
 
     # self.set_mode(MODE.CAD)
 
     def on_tx_done(self):
+        with self.radio_lock:
+            self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
+            self.set_dio_mapping([0] * 6)
+            self.reset_ptr_rx()
+            self.set_mode(MODE.RXCONT)
+        self.tx_idle.set()
         logf("TX DONE")
-        self.clear_irq_flags(TxDone=1)  # clear txdone IRQ flag
-        self.set_dio_mapping([0] * 6)
-        self.set_mode(MODE.RXCONT)
 
     def transmit(self, data):
-        self.write_payload([c for c in data])
-        self.set_dio_mapping([1, 0, 0, 0, 0, 0])
-        self.set_mode(MODE.TX)
+        with self.radio_lock:
+            self.tx_timeout = self.airtime(len(data)) + self.TX_TIMEOUT_MARGIN
+            self.tx_idle.clear()
+            self.write_payload([c for c in data])
+            self.set_dio_mapping([1, 0, 0, 0, 0, 0])
+            self.set_mode(MODE.TX)
 
     def aprs_data_type(self, lora_aprs_frame):
         delimiter_position = lora_aprs_frame.find(b":")

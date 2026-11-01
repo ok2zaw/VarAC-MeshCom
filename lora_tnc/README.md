@@ -25,6 +25,18 @@ IZ7BOJ, jak předepisuje jeho návod.
   neshodí příjem.
 - Knihovny displeje (`board`, `adafruit_ssd1306`, `PIL`) se importují jen při
   `disp_en = True`.
+- **Zpoždění TNC → rádio:** originál kontroloval frontu k odeslání jen jednou
+  za 3 s a odeslal nejvýš jeden rámec za 3 s. Rámce se teď vysílají hned;
+  další rámec čeká na dokončení předchozího vysílání (TxDone, s časovým
+  limitem podle doby vysílání) a při obsazeném kanálu krátce náhodně odloží.
+- **KISS:** rámce z LinBPQ se správně odescapují (originál posílal sekvence
+  FESC beze změny, takže rámce s bajty 0xC0/0xDB odcházely poškozené a musely
+  se opakovat), parametrické KISS rámce (TXDELAY apod.) se nevysílají a
+  opakovaný FEND mezi rámci už nezahodí následující rámec.
+- **Příjem:** IRQ příznaky se smažou a příjem se znovu zapne i po chybném nebo
+  prázdném rámci – jinak zůstal DIO0 v log. 1 a TNC přestal přijímat.
+  Přístup k SPI z hlavní smyčky a z vlákna přerušení je chráněn zámkem.
+- TCP spojení s LinBPQ používá `TCP_NODELAY`.
 - Cesta k `pySX127x` je určena podle umístění skriptu, ne aktuálního adresáře;
   `setDaemon()` je nahrazené atributem `daemon`.
 

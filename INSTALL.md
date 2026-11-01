@@ -881,7 +881,7 @@ PORT
  PACLEN=128
  MAXFRAME=1
  FRACK=20000
- RESPTIME=3000
+ RESPTIME=1000
  RETRIES=10
 ENDPORT
 
@@ -896,7 +896,7 @@ PORT
  PACLEN=128
  MAXFRAME=1
  FRACK=20000
- RESPTIME=3000
+ RESPTIME=1000
  RETRIES=10
 ENDPORT
 
@@ -908,8 +908,12 @@ LINMAIL
   `TCPPORT` musí odpovídat portu TNC1/TNC2 na záložce BPQ.
 - TNC přijímá vždy jen jedno TCP spojení – k jednomu TNC se smí připojit jen
   LinBPQ, ne současně další program (aprx, Direwolf).
-- `FRACK=20000` (ms) a `MAXFRAME=1` odpovídají pomalému LoRa kanálu; hodnoty
-  dolaďte podle zkušeností z provozu.
+- `FRACK=20000` (ms) a `MAXFRAME=1` odpovídají pomalému LoRa kanálu: krátký
+  rámec trvá při SF12/BW125 asi 1,3 s, rámec 128 bajtů přes 4 s. `FRACK` je
+  čas do opakování nepotvrzeného rámce – každá ztráta proto zdrží relaci o
+  tuto dobu.
+- `RESPTIME=1000` (ms) je čekání před odesláním potvrzení. Vyšší hodnota
+  (např. 3000) přidává zpoždění ke každé výměně rámců.
 - `LINMAIL` zapne poštovní server (BBS); `APPLICATION` zpřístupní BBS pod
   volacím znakem `OK2ZAW-1`.
 - Web LinBPQ (8008) a telnet (8010) zpřístupněte jen v LAN/VPN.

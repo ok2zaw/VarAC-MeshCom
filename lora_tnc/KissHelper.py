@@ -201,12 +201,36 @@ def encode_kiss_OE(frame,signalreport): #from Lora to Kiss, OE_Style
         return None
     return output
 
-def decode_kiss_OE(frame): #From Kiss to LoRa, OE_Style
+def kiss_data_payload(frame):
+    '''Return the unescaped AX.25 frame of a KISS data frame, or None.
 
-    if frame[0] != 0xC0 or frame[len(frame) - 1] != 0xC0:
+    Only data frames (command 0) are sent over LoRa. KISS parameter frames
+    (TXDELAY, persistence, slot time, ...) that LinBPQ sends to the TNC have
+    no meaning for LoRa and must not be transmitted as garbage frames.'''
+    if len(frame) < 3 or frame[0] != KISS_FEND or frame[-1] != KISS_FEND:
         logf("Kiss Header not found, abort decoding of Frame: "+repr(frame))
         return None
-    frame=frame[2:len(frame) - 1] #cut kiss delimitator 0xc0 and command 0x00
+    command = frame[1]
+    if command & 0x0F != 0x00:
+        logf("Ignoring KISS command frame 0x%02X" % command)
+        return None
+    payload = bytearray()
+    escaped = False
+    for x in frame[2:-1]:
+        if escaped:
+            payload.append({KISS_TFEND: KISS_FEND, KISS_TFESC: KISS_FESC}.get(x, x))
+            escaped = False
+        elif x == KISS_FESC:
+            escaped = True
+        else:
+            payload.append(x)
+    return bytes(payload) or None
+
+def decode_kiss_OE(frame): #From Kiss to LoRa, OE_Style
+
+    frame = kiss_data_payload(frame)
+    if frame is None:
+        return None
 
     src_addr,dest_addr,rpt_list,payload,dti=ax25parser(frame) #only for logging
 
@@ -215,16 +239,10 @@ def decode_kiss_OE(frame): #From Kiss to LoRa, OE_Style
     return result
 
 def decode_kiss_AX25(frame): #from kiss to LoRA, Standard AX25
-    result = b""
-
-    if frame[0] != 0xC0 or frame[len(frame) - 1] != 0xC0:
-        logf("Kiss Header not found, abort decoding of Frame: "+repr(frame))
-        return None
-    frame=frame[2:len(frame) - 1] #cut kiss delimitator 0xc0 and command 0x00
-
-    #src_addr,dest_addr,rpt_list,payload,dti=ax25parser(frame) #only for logging
-
-    return frame
+    # The original only cut the delimiters and did not unescape FESC
+    # sequences, so frames containing 0xC0/0xDB (e.g. some AX.25 control
+    # bytes) went out corrupted and had to be retried.
+    return kiss_data_payload(frame)
 
 
 class SerialParser():
@@ -252,7 +270,9 @@ class SerialParser():
                     self.state = self.STATE_FEND
             elif self.state == self.STATE_FEND:
                 if c == self.KISS_FEND:
-                    self.reset()
+                    # repeated FEND between frames: stay at frame start
+                    # (resetting here dropped the following frame)
+                    pass
                 else:
                     self.cur_frame.append(c)
                     self.state = self.STATE_DATA
