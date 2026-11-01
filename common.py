@@ -253,6 +253,32 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_station_observations_station_time "
             "ON station_observations(station, observed_at DESC)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS heard_rf_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                observed_at REAL NOT NULL,
+                station TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                destination_path TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                body TEXT NOT NULL,
+                msg_id TEXT,
+                rssi INTEGER,
+                snr INTEGER,
+                firmware TEXT,
+                fw_sub TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_heard_rf_messages_time "
+            "ON heard_rf_messages(observed_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_heard_rf_messages_channel_time "
+            "ON heard_rf_messages(channel, observed_at DESC)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -443,6 +469,94 @@ def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
         )
         conn.commit()
         return True
+    finally:
+        conn.close()
+
+
+def record_other_rf_message(packet: dict, own_callsign: str = "",
+                            configured_group: str = "") -> bool:
+    body = packet.get("msg")
+    destination_path = packet.get("dst")
+    source_path = packet.get("src")
+    if (
+        packet.get("src_type") != "lora"
+        or packet.get("type") != "msg"
+        or not isinstance(body, str)
+        or not body.strip()
+        or not isinstance(destination_path, str)
+        or not isinstance(source_path, str)
+    ):
+        return False
+
+    source_parts = [part.strip().upper() for part in source_path.split(",") if part.strip()]
+    destination_parts = [part.strip().upper() for part in destination_path.split(",") if part.strip()]
+    if not source_parts or not destination_parts:
+        return False
+
+    station = source_parts[0]
+    configured_group = str(configured_group or "").strip().upper()
+    channel = destination_parts[-1]
+    if station == str(own_callsign or "").strip().upper() or channel == configured_group:
+        return False
+
+    observation = {
+        "observed_at": time.time(),
+        "station": station,
+        "source_path": ",".join(source_parts),
+        "destination_path": ",".join(destination_parts),
+        "channel": channel,
+        "body": body[:2048],
+        "msg_id": str(packet.get("msg_id", ""))[:32] or None,
+        "rssi": _station_number(packet, "rssi", integer=True),
+        "snr": _station_number(packet, "snr", integer=True),
+        "firmware": str(packet["firmware"])[:32] if packet.get("firmware") is not None else None,
+        "fw_sub": str(packet["fw_sub"])[:8] if packet.get("fw_sub") is not None else None,
+    }
+    conn = get_db()
+    try:
+        columns = ", ".join(observation)
+        placeholders = ", ".join(f":{column}" for column in observation)
+        conn.execute(
+            f"INSERT INTO heard_rf_messages ({columns}) VALUES ({placeholders})",
+            observation,
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_heard_rf_messages(since: float, until: float, channel: str = "",
+                          limit: int = 500) -> list[dict]:
+    query = (
+        "SELECT * FROM heard_rf_messages "
+        "WHERE observed_at >= ? AND observed_at < ?"
+    )
+    params = [since, until]
+    if channel:
+        query += " AND channel = ?"
+        params.append(channel.strip().upper())
+    query += " ORDER BY observed_at DESC, id DESC LIMIT ?"
+    params.append(max(1, min(limit, 1000)))
+
+    conn = get_db()
+    try:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_heard_rf_messages(since: float, until: float, channel: str = "") -> int:
+    query = "SELECT COUNT(*) FROM heard_rf_messages WHERE observed_at >= ? AND observed_at < ?"
+    params = [since, until]
+    if channel:
+        query += " AND channel = ?"
+        params.append(channel.strip().upper())
+
+    conn = get_db()
+    try:
+        return conn.execute(query, params).fetchone()[0]
     finally:
         conn.close()
 

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Aktualizace – MeshCom Gateway{% endblock %}
+{% block content %}
+<h1>Aktualizace aplikace</h1>
+
+{% if page_error %}
+<div class="flash error" role="alert">{{ page_error }}</div>
+{% endif %}
+
+<section class="update-panel" aria-labelledby="installed-version-heading">
+  <div class="update-version">
+    <div>
+      <div class="card-label" id="installed-version-heading">Nainstalovaná verze</div>
+      {% if state %}
+      <div class="card-value">{{ state.version }}</div>
+      <div class="card-sub">commit {{ state.commit }} · větev {{ state.branch }}</div>
+      {% else %}
+      <div class="card-sub">Verzi se nepodařilo načíst.</div>
+      {% endif %}
+    </div>
+    <form method="post" action="{{ url_for('updates') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="check">
+      <button type="submit">Zkontrolovat novou verzi</button>
+    </form>
+  </div>
+</section>
+
+{% if update_check %}
+<section class="update-panel update-result" aria-labelledby="update-result-heading">
+  <h2 id="update-result-heading">Výsledek kontroly</h2>
+  <dl class="update-details">
+    <dt>Nejnovější verze</dt><dd>{{ update_check.latest_version }} · commit {{ update_check.latest_commit }}</dd>
+    <dt>Rozdíl</dt><dd>{{ update_check.commits_behind }} commitů</dd>
+    <dt>Stav</dt>
+    <dd>{% if not update_check.update_available %}Aplikace je aktuální.{% elif update_check.can_update %}Je dostupná aktualizace.{% else %}Aktualizace vyžaduje ruční zásah.{% endif %}</dd>
+  </dl>
+
+  {% if update_check.blockers %}
+  <div class="flash error" role="alert">
+    <strong>Automatický update je zablokován:</strong>
+    <ul>{% for blocker in update_check.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if update_check.can_update %}
+  <form method="post" action="{{ url_for('updates') }}" onsubmit="return confirm('Aktualizovat aplikaci a restartovat služby?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="apply">
+    <button type="submit">Aktualizovat a restartovat</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<p class="monitor-note">Tato funkce aktualizuje pouze aplikaci z origin/main. Systémové balíčky, Postfix/Dovecot, konfiguraci a proměnné prostředí nemění.</p>
+{% endblock %}

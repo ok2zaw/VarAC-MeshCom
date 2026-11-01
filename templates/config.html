@@ -40,12 +40,12 @@
   <fieldset>
     <legend>Odchozí e-mail (mesh → e-mail)</legend>
     <label>SMTP server
-      <input type="text" name="smtp_host" value="{{ cfg.smtp_host }}">
+      <input type="text" name="smtp_host" value="{{ cfg.smtp_host }}" placeholder="smtp.example.com nebo localhost">
     </label>
     <label>SMTP port
       <input type="number" name="smtp_port" value="{{ cfg.smtp_port }}" min="1" max="65535">
     </label>
-    <label>SMTP uživatel
+    <label>SMTP uživatel <span class="hint">(prázdné jen pro místní relay)</span>
       <input type="text" name="smtp_user" value="{{ cfg.smtp_user }}">
     </label>
     <label>SMTP heslo <span class="hint">(vyplň jen pro změnu)</span>

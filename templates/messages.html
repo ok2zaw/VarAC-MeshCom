@@ -1,7 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Zprávy – MeshCom Gateway{% endblock %}
 {% block content %}
-<h1>Historie zpráv</h1>
+<h1>Zprávy</h1>
+
+<section class="send-panel" id="send-message" aria-labelledby="send-heading">
+  <div class="send-panel-heading">
+    <h2 id="send-heading">Odeslat zprávu</h2>
+    <p class="card-sub">Cílová skupina: <strong>{{ cfg.mesh_group }}</strong></p>
+  </div>
+  <form method="post" action="{{ url_for('send_message') }}" class="send-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="mesh-message">Text zprávy</label>
+    <textarea id="mesh-message" name="message" rows="3" maxlength="{{ cfg.max_mesh_payload }}" required></textarea>
+    <div class="send-form-footer">
+      <span class="hint">Maximum {{ cfg.max_mesh_payload }} znaků. Odesílá se přímo do skupiny.</span>
+      <button type="submit">Odeslat do MeshCom</button>
+    </div>
+  </form>
+</section>
+
+<h2>Historie zpráv</h2>
 
 <table class="msg-table">
   <thead>

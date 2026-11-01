@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+REQUEST_FILE=/home/pi/meshcom-gateway/.meshcom-restart-request
+[ -f "$REQUEST_FILE" ] || exit 0
+rm -f -- "$REQUEST_FILE"
+
+exec /usr/bin/systemctl restart meshcom-gateway.service meshcom-web.service

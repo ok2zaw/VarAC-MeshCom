@@ -143,6 +143,32 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .card-sub { margin-top: 0.2rem; color: var(--text-muted); font-size: 11px; }
 .monitor-note { margin: -0.75rem 0 1.5rem; color: var(--text-muted); font-size: 11px; }
 
+.update-panel {
+  margin: 0 0 1rem;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.update-version { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.update-panel h2 { margin: 0 0 0.8rem; font-size: 15px; }
+.update-panel button {
+  min-height: 32px;
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.update-panel button:hover { background: var(--accent-hover); }
+.update-details { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); gap: 6px 12px; margin: 0 0 1rem; font-size: 12px; }
+.update-details dt { color: var(--text-muted); }
+.update-details dd { margin: 0; overflow-wrap: anywhere; }
+.update-result .flash { margin: 0 0 1rem; }
+
 .station-filter {
   display: flex;
   align-items: end;
@@ -163,6 +189,9 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .station-table { min-width: 1180px; }
 .station-table td { white-space: nowrap; }
 .station-table td:nth-child(5) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.rf-message-table { min-width: 940px; }
+.rf-message-table td { white-space: nowrap; }
+.rf-message-table td:last-child { min-width: 280px; max-width: 560px; white-space: normal; overflow-wrap: anywhere; }
 .station-table a, .clear-filter { color: var(--accent-text); text-decoration: none; }
 .station-table a:hover, .clear-filter:hover { text-decoration: underline; }
 .clear-filter { margin-left: 8px; font-family: "Montserrat", "Segoe UI", sans-serif; font-size: 11px; font-weight: 500; }

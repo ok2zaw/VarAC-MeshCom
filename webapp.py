@@ -20,6 +20,7 @@ recommended if the Pi is reachable from outside your LAN).
 """
 
 import hmac
+import ipaddress
 import os
 import secrets
 import time
@@ -30,6 +31,7 @@ from flask import Flask, abort, flash, request, redirect, url_for, render_templa
 
 import common
 import gateway
+import update_manager
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("MESHCOM_FLASK_SECRET") or secrets.token_hex(32)
@@ -84,7 +86,16 @@ def validate_config_values(form_data, cfg):
     if form_data.get("imap_user") and not form_data.get("imap_host"):
         errors["imap_host"] = "je potřeba pro IMAP uživatele"
 
-    if form_data.get("smtp_host") and not form_data.get("smtp_user"):
+    smtp_host = str(form_data.get("smtp_host", "")).strip().lower().strip("[]")
+    smtp_user = str(form_data.get("smtp_user", "")).strip()
+    local_smtp = smtp_host == "localhost"
+    if not local_smtp and smtp_host:
+        try:
+            local_smtp = ipaddress.ip_address(smtp_host).is_loopback
+        except ValueError:
+            pass
+
+    if smtp_host and not smtp_user and not local_smtp:
         errors["smtp_user"] = "je potřeba pro SMTP server"
 
     return {"ok": not errors, "errors": errors}
@@ -159,7 +170,7 @@ def send_message():
                 "success",
             )
 
-    return redirect(url_for("status", _anchor="send-message"))
+    return redirect(url_for("messages", _anchor="send-message"))
 
 
 @app.route("/messages")
@@ -172,6 +183,7 @@ def messages():
     total_pages = max((counts["total"] + per_page - 1) // per_page, 1)
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
+        cfg=common.load_config(),
     )
 
 
@@ -193,14 +205,19 @@ def stations():
     since = datetime.combine(start_day, datetime_time.min).timestamp()
     until = datetime.combine(end_day + timedelta(days=1), datetime_time.min).timestamp()
     selected_station = request.args.get("station", "").strip().upper()
+    selected_channel = request.args.get("channel", "").strip().upper()
     summary = common.get_station_summary(since, until)
     history_count = common.count_station_history(since, until, selected_station)
     history = common.get_station_history(since, until, selected_station, limit=500)
+    heard_message_count = common.count_heard_rf_messages(since, until, selected_channel)
+    heard_messages = common.get_heard_rf_messages(since, until, selected_channel, limit=500)
 
     for row in summary:
         row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
         row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
     for row in history:
+        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
+    for row in heard_messages:
         row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
     return render_template(
@@ -208,7 +225,10 @@ def stations():
         summary=summary,
         history=history,
         history_count=history_count,
+        heard_messages=heard_messages,
+        heard_message_count=heard_message_count,
         selected_station=selected_station,
+        selected_channel=selected_channel,
         start_date=start_day.isoformat(),
         end_date=end_day.isoformat(),
     )
@@ -261,6 +281,58 @@ def config_page():
             saved = True
 
     return render_template("config.html", cfg=cfg, saved=saved, errors=errors)
+
+
+@app.route("/updates", methods=["GET", "POST"])
+@requires_auth
+def updates():
+    page_error = None
+    try:
+        state = update_manager.current_state()
+    except update_manager.UpdateError as exc:
+        state = None
+        page_error = str(exc)
+
+    if request.method == "POST":
+        require_csrf_token()
+        action = request.form.get("action")
+        if action == "check":
+            try:
+                update_check = update_manager.check_for_updates()
+                try:
+                    update_manager.check_restart_helper()
+                except update_manager.UpdateError as exc:
+                    update_check["can_update"] = False
+                    update_check["blockers"].append(str(exc))
+                session["update_check"] = update_check
+                flash("Kontrola dokončena.", "success")
+            except update_manager.UpdateError as exc:
+                session.pop("update_check", None)
+                page_error = str(exc)
+        elif action == "apply":
+            try:
+                update_manager.check_restart_helper()
+                updated_state = update_manager.apply_update()
+                session.pop("update_check", None)
+                flash(
+                    f"Aplikace aktualizována na verzi {updated_state['version']} "
+                    f"({updated_state['commit']}). Služby se nyní restartují.",
+                    "success",
+                )
+                response = redirect(url_for("updates"))
+                response.call_on_close(update_manager.launch_service_restart)
+                return response
+            except update_manager.UpdateError as exc:
+                page_error = str(exc)
+        else:
+            abort(400, description="Neznámá akce aktualizace.")
+
+    return render_template(
+        "updates.html",
+        state=state,
+        update_check=session.get("update_check"),
+        page_error=page_error,
+    )
 
 
 if __name__ == "__main__":

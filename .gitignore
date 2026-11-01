@@ -6,6 +6,7 @@ __pycache__/
 *.db
 *.tmp
 .env
+.meshcom-restart-request
 venv/
 .venv/
 .idea/

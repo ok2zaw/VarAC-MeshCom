@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart the MeshCom application services after a web update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/meshcom-restart

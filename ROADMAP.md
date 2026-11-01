@@ -28,6 +28,8 @@ protokol s JSON zprávami; výchozí port je `1799`.
 	validace délky, CSRF ochrana a záznam v historii.
 - RF tabulka a časová historie stanic z příchozích ExtUDP rámců `pos`, `msg` a
 	`tele` s `src_type=lora`; zahrnuje signál, polohu a dostupná metadata.
+- Oddělená časově a cílovou skupinou filtrovatelná historie textových LoRa zpráv
+	mimo hlavní MeshCom skupinu.
 - SQLite historie zpráv a chyb, heartbeat gateway a systemd služby pro gateway
 	i web. Systemd restartuje proces po chybovém ukončení.
 - Základní testy UDP monitoru, převodu zpráv, Maildir, konfigurace a validace

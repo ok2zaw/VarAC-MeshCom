@@ -132,6 +132,15 @@ def udp_listener():
         except sqlite3.Error as exc:
             log.warning("Could not record RF station observation: %s", exc)
 
+        recorded_rf_message = False
+        if packet.get("type") == "msg":
+            try:
+                recorded_rf_message = common.record_other_rf_message(
+                    packet, cfg.get("callsign", ""), cfg.get("mesh_group", "")
+                )
+            except sqlite3.Error as exc:
+                log.warning("Could not record other RF message: %s", exc)
+
         if packet.get("type") != "msg":
             status = "RF pozorování" if recorded_station else "ignorován jiný typ"
             update_udp_monitor("rx", peer, status, count_datagram=False)
@@ -139,7 +148,8 @@ def udp_listener():
 
         dst = str(packet.get("dst", ""))
         if dst != str(cfg["mesh_group"]):
-            update_udp_monitor("rx", peer, "ignorována jiná skupina", count_datagram=False)
+            status = "zachycena jiná RF skupina" if recorded_rf_message else "ignorována jiná skupina"
+            update_udp_monitor("rx", peer, status, count_datagram=False)
             continue
 
         update_udp_monitor("rx", peer, "MeshCom zpráva", count_datagram=False)

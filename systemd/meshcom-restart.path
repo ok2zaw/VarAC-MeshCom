@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for an authenticated MeshCom application update request
+
+[Path]
+PathExists=/home/pi/meshcom-gateway/.meshcom-restart-request
+Unit=meshcom-restart.service
+
+[Install]
+WantedBy=multi-user.target

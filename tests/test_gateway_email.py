@@ -7,17 +7,106 @@ from unittest.mock import patch
 
 import common
 import gateway
+import update_manager
 import webapp
 
 
 class GatewayEmailTests(unittest.TestCase):
+    def test_update_check_shows_apply_only_when_restart_helper_is_ready(self):
+        state = {"version": "0.1", "commit": "abc123", "branch": "main"}
+        check = {
+            **state,
+            "latest_version": "0.1",
+            "latest_commit": "def456",
+            "commits_behind": 1,
+            "update_available": True,
+            "blockers": [],
+            "can_update": True,
+        }
+        with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
+             patch.object(update_manager, "current_state", return_value=state), \
+             patch.object(update_manager, "check_for_updates", return_value=check), \
+             patch.object(update_manager, "check_restart_helper") as helper_check:
+            with webapp.app.test_client() as client:
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                response = client.post(
+                    "/updates", data={"action": "check", "csrf_token": "test-token"}
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Aktualizovat a restartovat".encode(), response.data)
+        helper_check.assert_called_once_with()
+
+    def test_update_check_requires_csrf_token(self):
+        with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
+             patch.object(update_manager, "check_for_updates") as check_for_updates:
+            response = webapp.app.test_client().post(
+                "/updates", data={"action": "check"}
+            )
+
+        self.assertEqual(response.status_code, 400)
+        check_for_updates.assert_not_called()
+
+    def test_update_manager_does_not_merge_when_manual_steps_are_required(self):
+        blocked_check = {
+            "can_update": False,
+            "blockers": ["Aktualizace mění systémové soubory."],
+        }
+        with patch.object(update_manager, "check_for_updates", return_value=blocked_check), \
+             patch.object(update_manager, "_git") as git:
+            with self.assertRaises(update_manager.UpdateError):
+                update_manager.apply_update()
+
+        git.assert_not_called()
+
+    def test_other_rf_messages_store_only_lora_messages_outside_configured_group(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+                common.init_db()
+                other_channel = {
+                    "src_type": "lora",
+                    "type": "msg",
+                    "src": "OK1AAA-1,OK2BBB-2",
+                    "dst": "OK3CCC-3,54321",
+                    "msg": "RF check",
+                    "msg_id": "0123ABCD",
+                    "rssi": -94,
+                    "snr": 5,
+                }
+
+                self.assertTrue(common.record_other_rf_message(
+                    other_channel, "OK9NODE-1", "12345"
+                ))
+                self.assertFalse(common.record_other_rf_message(
+                    {**other_channel, "dst": "OK3CCC-3,12345"}, "OK9NODE-1", "12345"
+                ))
+                self.assertFalse(common.record_other_rf_message(
+                    {**other_channel, "src_type": "udp"}, "OK9NODE-1", "12345"
+                ))
+                self.assertFalse(common.record_other_rf_message(
+                    {**other_channel, "src": "OK9NODE-1"}, "OK9NODE-1", "12345"
+                ))
+
+                rows = common.get_heard_rf_messages(0, 4_102_444_800, "54321")
+                count = common.count_heard_rf_messages(0, 4_102_444_800)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(rows[0]["station"], "OK1AAA-1")
+        self.assertEqual(rows[0]["source_path"], "OK1AAA-1,OK2BBB-2")
+        self.assertEqual(rows[0]["channel"], "54321")
+        self.assertEqual(rows[0]["body"], "RF check")
+        self.assertEqual(rows[0]["rssi"], -94)
+
     def test_station_page_applies_inclusive_date_filter(self):
         with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
              patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
              patch.object(webapp.common, "count_station_history", return_value=0) as count_history, \
-             patch.object(webapp.common, "get_station_history", return_value=[]) as history:
+             patch.object(webapp.common, "get_station_history", return_value=[]) as history, \
+             patch.object(webapp.common, "count_heard_rf_messages", return_value=0) as rf_count, \
+             patch.object(webapp.common, "get_heard_rf_messages", return_value=[]) as rf_messages:
             response = webapp.app.test_client().get(
-                "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1"
+                "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1&channel=54321"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -26,6 +115,8 @@ class GatewayEmailTests(unittest.TestCase):
         summary.assert_called_once_with(expected_start, expected_end)
         count_history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1")
         history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1", limit=500)
+        rf_count.assert_called_once_with(expected_start, expected_end, "54321")
+        rf_messages.assert_called_once_with(expected_start, expected_end, "54321", limit=500)
 
     def test_station_observations_store_rf_position_signal_and_telemetry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,6 +199,7 @@ class GatewayEmailTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/messages#send-message")
         send_udp.assert_called_once_with(cfg, "12345", "Maintenance starts")
         log_message.assert_called_once_with(
             "web_to_mesh", "12345", "Web → MeshCom", "Maintenance starts"
@@ -227,6 +319,19 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertIn("imap_port", result["errors"]) 
         self.assertIn("poll_interval_seconds", result["errors"]) 
         self.assertIn("max_mesh_payload", result["errors"]) 
+
+    def test_validate_config_allows_local_smtp_relay_without_auth(self):
+        for host in ("localhost", "127.0.0.1", "::1"):
+            with self.subTest(host=host):
+                result = webapp.validate_config_values(
+                    {"smtp_host": host, "smtp_user": ""}, {}
+                )
+                self.assertTrue(result["ok"])
+
+        remote_result = webapp.validate_config_values(
+            {"smtp_host": "smtp.example.com", "smtp_user": ""}, {}
+        )
+        self.assertIn("smtp_user", remote_result["errors"])
 
     def test_long_email_is_split_and_attachments_are_ignored(self):
         body = "A" * 500
