@@ -56,6 +56,33 @@ DEFAULT_CONFIG = {
     "radio_varac_path": "/home/pi/.wine/drive_c/VarAC/VarAC.exe",
     "radio_varac_autostart": False,
     "radio_varac_delay": 40,
+    # LoRa TNC defaults follow the OK2ZAW dual-TNC board (IRQ 5 / 19).
+    # The frequency is left empty on purpose so nothing transmits until set.
+    **{
+        f"{tnc}_{key}": value
+        for tnc, irq_pin, cs_id, tcp_port in (("tnc1", 5, 0, 10001), ("tnc2", 19, 1, 10002))
+        for key, value in {
+            "enabled": False,
+            "autostart": False,
+            "delay": 0,
+            "tcp_host": "127.0.0.1",
+            "tcp_port": tcp_port,
+            "bus_id": 0,
+            "cs_id": cs_id,
+            "irq_pin": irq_pin,
+            "frequency_mhz": "",
+            "spreading_factor": 12,
+            "bandwidth": 125000,
+            "coding_rate": 5,
+            "preamble": 8,
+            "output_power": 15,
+            "sync_word": "0x12",
+        }.items()
+    },
+    "linbpq_path": "/home/pi/linbpq/linbpq",
+    "linbpq_autostart": False,
+    "linbpq_delay": 15,
+    "linbpq_web_port": 8008,
 }
 
 

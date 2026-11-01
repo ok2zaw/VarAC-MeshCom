@@ -343,7 +343,8 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 
 .config-form input[type="text"],
 .config-form input[type="number"],
-.config-form input[type="password"] {
+.config-form input[type="password"],
+.config-form select {
   display: block;
   width: 100%;
   min-width: 60px;

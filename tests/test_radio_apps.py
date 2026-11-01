@@ -77,7 +77,7 @@ class RadioAppsTests(unittest.TestCase):
             now[0] += seconds
 
         with patch.object(radio_apps, "start", return_value=True) as start, \
-             patch.object(radio_apps, "_systemctl"):
+             patch.object(radio_apps, "systemctl"):
             radio_apps.run_autostart(cfg, sleep=fake_sleep, clock=lambda: now[0])
 
         self.assertEqual([call.args[0] for call in start.call_args_list], ["vara", "varac"])

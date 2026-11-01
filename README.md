@@ -32,6 +32,10 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
 	VarAC, včetně automatického startu po přihlášení do desktopu se zpožděním
 	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
+- Spouštět, nastavovat a sledovat dva LoRa KISS TNC (TNC1, TNC2; upravená
+	kopie IZ7BOJ ve složce `lora_tnc/`) a LinBPQ (uzel a BBS) ze záložky BPQ,
+	včetně startu po zapnutí Pi se zpožděním; BBS lze napojit na místní
+	Postfix jako e-mailovou bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
 - Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Konfigurace

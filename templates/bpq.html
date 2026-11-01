@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}BPQ – MeshCom Gateway{% endblock %}
+{% block content %}
+{% set state_labels = {"active": "Běží", "activating": "Spouští se", "deactivating": "Zastavuje se", "inactive": "Neběží", "failed": "Chyba", "unknown": "Neznámý"} %}
+<h1>LinBPQ a LoRa TNC</h1>
+<p class="monitor-note">Služby běží jako uživatelské systemd jednotky účtu gateway i bez přihlášeného desktopu. Uzel, BBS a pošta se nastavují ve webu LinBPQ: <a class="clear-filter" href="{{ bpq_web_url }}" target="_blank" rel="noopener">otevřít {{ bpq_web_url }}</a> · <a class="clear-filter" href="{{ url_for('bpq') }}">Obnovit stav</a></p>
+
+<div class="cards">
+  {% for item in services %}
+  {% set state = item.status.state %}
+  <div class="card {{ 'ok' if state == 'active' else 'bad' if state == 'failed' else '' }}">
+    <div class="card-label">{{ item.label }}{% if item.name in tncs %} · port {{ cfg[item.name ~ '_tcp_port'] }}{% endif %}</div>
+    <div class="card-value">{% if state == 'active' %}🟢{% elif state == 'failed' %}🔴{% else %}⚪{% endif %} {{ state_labels.get(state, state) }}</div>
+    <div class="card-sub">
+      {% if not item.enabled %}není povolen
+      {% elif item.status.error %}{{ item.status.error }}
+      {% elif item.status.since %}od {{ item.status.since }}
+      {% elif item.status.enabled in ('', 'not-found') %}služba zatím není vytvořená
+      {% else %}start po spuštění Pi {{ 'zapnutý, za ' ~ item.delay ~ ' s' if item.status.enabled == 'enabled' else 'vypnutý' }}{% endif %}
+    </div>
+    {% if item.enabled %}
+    <div class="radio-actions">
+      {% for action, text in [("start", "Spustit"), ("restart", "Restart"), ("stop", "Zastavit")] %}
+      <form method="post" action="{{ url_for('bpq') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="service" value="{{ item.name }}">
+        <input type="hidden" name="action" value="{{ action }}">
+        <button type="submit"{% if action == 'stop' %} class="secondary"{% endif %}>{{ text }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<form method="post" action="{{ url_for('bpq') }}" class="config-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="save">
+
+  {% for tnc in tncs %}
+  {% set label = tnc|upper %}
+  <fieldset>
+    <legend>{{ label }} – LoRa KISS TNC</legend>
+    <label class="checkbox">
+      <input type="checkbox" name="{{ tnc }}_enabled" {{ 'checked' if cfg[tnc ~ '_enabled'] }}>
+      {{ label }} je osazen a používá se
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="{{ tnc }}_autostart" {{ 'checked' if cfg[tnc ~ '_autostart'] }}>
+      Spouštět po startu Raspberry Pi
+    </label>
+    <label>Zpoždění startu (s)
+      <input type="number" name="{{ tnc }}_delay" value="{{ cfg[tnc ~ '_delay'] }}" min="0" max="600">
+    </label>
+    <label>KISS TCP adresa <span class="hint">(127.0.0.1 = jen pro LinBPQ na tomto Pi)</span>
+      <input type="text" name="{{ tnc }}_tcp_host" value="{{ cfg[tnc ~ '_tcp_host'] }}">
+    </label>
+    <label>KISS TCP port <span class="hint">(pro každý TNC jiný)</span>
+      <input type="number" name="{{ tnc }}_tcp_port" value="{{ cfg[tnc ~ '_tcp_port'] }}" min="1024" max="65535">
+    </label>
+    <label>IRQ pin (DIO0, číslo BCM) <span class="hint">(deska OK2ZAW: TNC1 = 5, TNC2 = 19)</span>
+      <input type="number" name="{{ tnc }}_irq_pin" value="{{ cfg[tnc ~ '_irq_pin'] }}" min="0" max="27">
+    </label>
+    <label>SPI sběrnice
+      <input type="number" name="{{ tnc }}_bus_id" value="{{ cfg[tnc ~ '_bus_id'] }}" min="0" max="6">
+    </label>
+    <label>SPI chip select
+      <input type="number" name="{{ tnc }}_cs_id" value="{{ cfg[tnc ~ '_cs_id'] }}" min="0" max="2">
+    </label>
+    <label>Kmitočet (MHz) <span class="hint">(bez kmitočtu se služba nevytvoří)</span>
+      <input type="text" name="{{ tnc }}_frequency_mhz" value="{{ cfg[tnc ~ '_frequency_mhz'] }}" placeholder="např. 433.900" inputmode="decimal">
+    </label>
+    <label>Spreading factor
+      <input type="number" name="{{ tnc }}_spreading_factor" value="{{ cfg[tnc ~ '_spreading_factor'] }}" min="6" max="12">
+    </label>
+    <label>Šířka pásma (Hz)
+      <select name="{{ tnc }}_bandwidth">
+        {% for bandwidth in bandwidths %}
+        <option value="{{ bandwidth }}" {{ 'selected' if cfg[tnc ~ '_bandwidth']|string == bandwidth|string }}>{{ bandwidth }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Coding rate (4/x)
+      <input type="number" name="{{ tnc }}_coding_rate" value="{{ cfg[tnc ~ '_coding_rate'] }}" min="5" max="8">
+    </label>
+    <label>Preambule
+      <input type="number" name="{{ tnc }}_preamble" value="{{ cfg[tnc ~ '_preamble'] }}" min="6" max="65535">
+    </label>
+    <label>Výkon (0–15 → 2–17 dBm)
+      <input type="number" name="{{ tnc }}_output_power" value="{{ cfg[tnc ~ '_output_power'] }}" min="0" max="15">
+    </label>
+    <label>Sync word
+      <input type="text" name="{{ tnc }}_sync_word" value="{{ cfg[tnc ~ '_sync_word'] }}">
+    </label>
+  </fieldset>
+  {% endfor %}
+
+  <fieldset>
+    <legend>LinBPQ</legend>
+    <label class="checkbox">
+      <input type="checkbox" name="linbpq_autostart" {{ 'checked' if cfg.linbpq_autostart }}>
+      Spouštět po startu Raspberry Pi
+    </label>
+    <label>Zpoždění startu (s) <span class="hint">(spouští se vždy až po TNC)</span>
+      <input type="number" name="linbpq_delay" value="{{ cfg.linbpq_delay }}" min="0" max="600">
+    </label>
+    <label>Program LinBPQ <span class="hint">(adresář s bpq32.cfg)</span>
+      <input type="text" name="linbpq_path" value="{{ cfg.linbpq_path }}">
+    </label>
+    <label>Port webu LinBPQ
+      <input type="number" name="linbpq_web_port" value="{{ cfg.linbpq_web_port }}" min="1" max="65535">
+    </label>
+  </fieldset>
+
+  <p class="hint">Uložení přepíše ~/.config/meshcom/tnc*.json a soubory služeb v ~/.config/systemd/user. Kmitočet a parametry LoRa musí odpovídat protistanicím; TNC podporuje moduly SX127x (RFM96/98).</p>
+  <button type="submit">Uložit</button>
+</form>
+
+<h2>Poslední výpis služeb</h2>
+{% for item in services %}
+<details class="radio-log">
+  <summary>{{ item.label }} <span class="hint">({{ item.unit }})</span></summary>
+  <pre>{{ item.log or 'Žádný záznam v journalu.' }}</pre>
+</details>
+{% endfor %}
+{% endblock %}

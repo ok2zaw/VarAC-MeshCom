@@ -29,6 +29,7 @@ from functools import wraps
 
 from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
 
+import bpq_services
 import common
 import gateway
 import radio_apps
@@ -377,6 +378,108 @@ def radio():
         "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
         port_conflict=port_conflict,
         autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
+    )
+
+
+BPQ_TNC_FIELDS = (
+    "tcp_host", "tcp_port", "bus_id", "cs_id", "irq_pin", "frequency_mhz",
+    "spreading_factor", "bandwidth", "coding_rate", "preamble", "output_power", "sync_word",
+)
+
+
+def save_bpq_settings(form_data, cfg):
+    new_cfg = dict(cfg)
+    errors = []
+    for tnc in bpq_services.TNCS:
+        new_cfg[f"{tnc}_enabled"] = form_data.get(f"{tnc}_enabled") == "on"
+        for field in BPQ_TNC_FIELDS:
+            key = f"{tnc}_{field}"
+            new_cfg[key] = str(form_data.get(key, cfg.get(key, ""))).strip()
+    new_cfg["linbpq_path"] = str(form_data.get("linbpq_path", cfg.get("linbpq_path", ""))).strip()
+    for service, spec in bpq_services.SERVICES.items():
+        new_cfg[f"{service}_autostart"] = form_data.get(f"{service}_autostart") == "on"
+        try:
+            delay = int(form_data.get(f"{service}_delay", ""))
+        except (TypeError, ValueError):
+            errors.append(f"{spec['label']}: zpoždění musí být celé číslo.")
+            continue
+        if not 0 <= delay <= bpq_services.MAX_DELAY_SECONDS:
+            errors.append(f"{spec['label']}: zpoždění musí být 0 až {bpq_services.MAX_DELAY_SECONDS} s.")
+            continue
+        new_cfg[f"{service}_delay"] = delay
+    try:
+        port = int(form_data.get("linbpq_web_port", ""))
+    except (TypeError, ValueError):
+        port = 0
+    if 1 <= port <= 65535:
+        new_cfg["linbpq_web_port"] = port
+    else:
+        errors.append("Port webu LinBPQ musí být v rozsahu 1 až 65535.")
+    errors.extend(bpq_services.validate(new_cfg))
+    return new_cfg, errors
+
+
+@app.route("/bpq", methods=["GET", "POST"])
+@requires_auth
+def bpq():
+    cfg = common.load_config()
+    if request.method == "POST":
+        require_csrf_token()
+        action = request.form.get("action")
+        if action == "save":
+            new_cfg, errors = save_bpq_settings(request.form, cfg)
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+            else:
+                common.save_config(new_cfg)
+                try:
+                    unit_errors = bpq_services.write_units(new_cfg)
+                except (OSError, radio_apps.RadioError) as exc:
+                    flash(f"Nastavení uloženo, ale služby se nepodařilo zapsat: {exc}", "error")
+                else:
+                    for message in unit_errors:
+                        flash(message, "error")
+                    if not unit_errors:
+                        flash("Nastavení uloženo. Běžící TNC a LinBPQ restartujte, aby změny použily.",
+                              "success")
+        elif action in {"start", "stop", "restart"}:
+            service = request.form.get("service", "")
+            if service not in bpq_services.SERVICES:
+                abort(400, description="Neznámá služba.")
+            label = bpq_services.SERVICES[service]["label"]
+            try:
+                if action == "start":
+                    started = bpq_services.start(service)
+                    flash(f"{label} se spouští." if started else f"{label} už běží.", "success")
+                elif action == "stop":
+                    bpq_services.stop(service)
+                    flash(f"{label} zastaven.", "success")
+                else:
+                    bpq_services.restart(service)
+                    flash(f"{label} se restartuje.", "success")
+            except radio_apps.RadioError as exc:
+                flash(f"{label}: {exc}", "error")
+        else:
+            abort(400, description="Neznámá akce.")
+        return redirect(url_for("bpq"))
+
+    services = []
+    for service, spec in bpq_services.SERVICES.items():
+        services.append({
+            "name": service,
+            "label": spec["label"],
+            "unit": spec["unit"],
+            "enabled": bpq_services.is_enabled(service, cfg),
+            "status": bpq_services.status(service),
+            "log": bpq_services.recent_log(service),
+            "autostart": bool(cfg.get(f"{service}_autostart")),
+            "delay": cfg.get(f"{service}_delay", 0),
+        })
+    return render_template(
+        "bpq.html", cfg=cfg, services=services, tncs=bpq_services.TNCS,
+        bandwidths=bpq_services.BANDWIDTHS,
+        bpq_web_url=f"http://{request.host.split(':')[0]}:{cfg.get('linbpq_web_port', 8008)}/",
     )
 
 

@@ -75,7 +75,7 @@ def _run(arguments: list[str], check: bool = True, timeout: int = 20) -> subproc
     return result
 
 
-def _systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess:
+def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProcess:
     return _run(["systemctl", "--user", *arguments], check=check)
 
 
@@ -138,7 +138,7 @@ def _environment(cfg: dict) -> list[str]:
 
 
 def _launch(unit: str, description: str, command: list[str], cfg: dict) -> None:
-    _systemctl("reset-failed", unit, check=False)
+    systemctl("reset-failed", unit, check=False)
     arguments = ["systemd-run", "--user", "--collect", f"--unit={unit}",
                  f"--description={description}"]
     for item in _environment(cfg):
@@ -146,23 +146,23 @@ def _launch(unit: str, description: str, command: list[str], cfg: dict) -> None:
     _run([*arguments, "--", *command])
 
 
-def _is_active(unit: str) -> bool:
-    return _systemctl("is-active", "--quiet", unit, check=False).returncode == 0
+def is_active(unit: str) -> bool:
+    return systemctl("is-active", "--quiet", unit, check=False).returncode == 0
 
 
 def _ensure_wineserver(cfg: dict) -> None:
-    if _is_active(WINESERVER_UNIT) or shutil.which("wineserver") is None:
+    if is_active(WINESERVER_UNIT) or shutil.which("wineserver") is None:
         return
     _launch(WINESERVER_UNIT, "MeshCom shared wineserver",
             ["wineserver", "--foreground", "--persistent"], cfg)
     time.sleep(1)
 
 
-def status(app: str) -> dict:
-    result = {"state": "unknown", "sub_state": "", "since": "", "error": None}
+def unit_status(unit: str) -> dict:
+    result = {"state": "unknown", "sub_state": "", "since": "", "enabled": "", "error": None}
     try:
-        output = _systemctl(
-            "show", unit_name(app), "--property=ActiveState,SubState,ActiveEnterTimestamp",
+        output = systemctl(
+            "show", unit, "--property=ActiveState,SubState,ActiveEnterTimestamp,UnitFileState",
         ).stdout
     except RadioError as exc:
         result["error"] = str(exc)
@@ -170,16 +170,21 @@ def status(app: str) -> dict:
     properties = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
     result["state"] = properties.get("ActiveState", "unknown")
     result["sub_state"] = properties.get("SubState", "")
+    result["enabled"] = properties.get("UnitFileState", "")
     if result["state"] == "active":
         result["since"] = properties.get("ActiveEnterTimestamp", "")
     return result
+
+
+def status(app: str) -> dict:
+    return unit_status(unit_name(app))
 
 
 def start(app: str, cfg: dict | None = None) -> bool:
     """Start the program; returns False if it was already running."""
     cfg = cfg or common.load_config()
     unit = unit_name(app)
-    if _is_active(unit):
+    if is_active(unit):
         return False
     command = app_command(app, cfg)
     if APPS[app]["kind"] == "wine":
@@ -189,9 +194,9 @@ def start(app: str, cfg: dict | None = None) -> bool:
 
 
 def stop(app: str) -> None:
-    _systemctl("stop", unit_name(app))
-    if APPS[app]["kind"] == "wine" and not any(_is_active(unit_name(item)) for item in WINE_APPS):
-        _systemctl("stop", WINESERVER_UNIT, check=False)
+    systemctl("stop", unit_name(app))
+    if APPS[app]["kind"] == "wine" and not any(is_active(unit_name(item)) for item in WINE_APPS):
+        systemctl("stop", WINESERVER_UNIT, check=False)
 
 
 def restart(app: str, cfg: dict | None = None) -> None:
@@ -199,16 +204,20 @@ def restart(app: str, cfg: dict | None = None) -> None:
     start(app, cfg)
 
 
-def recent_log(app: str, lines: int = 15) -> str:
+def unit_log(unit: str, lines: int = 15) -> str:
     try:
         result = _run(
-            ["journalctl", "--user", "-u", unit_name(app), "-n", str(lines),
+            ["journalctl", "--user", "-u", unit, "-n", str(lines),
              "--no-pager", "-o", "short-iso"],
             check=False,
         )
     except RadioError:
         return ""
     return result.stdout.strip()
+
+
+def recent_log(app: str, lines: int = 15) -> str:
+    return unit_log(unit_name(app), lines)
 
 
 def autostart_plan(cfg: dict) -> list[tuple[int, str]]:
@@ -257,7 +266,7 @@ def run_autostart(cfg: dict | None = None, sleep=time.sleep, clock=time.monotoni
     cfg = cfg or common.load_config()
     session_vars = [name for name in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY") if os.environ.get(name)]
     if session_vars:
-        _systemctl("import-environment", *session_vars, check=False)
+        systemctl("import-environment", *session_vars, check=False)
 
     started_at = clock()
     for delay, app in autostart_plan(cfg):

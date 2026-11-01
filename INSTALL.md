@@ -618,10 +618,22 @@ grafického prostředí a nabízí TCP rozhraní kompatibilní s VARA (ARQ port
 `8300`, data `8301`). Balíčky jsou připravené pro Debian 13 Trixie / aktuální
 Raspberry Pi OS arm64:
 
+Server s klíčem nemá platný HTTPS certifikát, proto klíč stáhněte bez kontroly
+certifikátu a **před instalací ověřte jeho otisk**:
+
 ```bash
-wget -qO- https://debian.hermes.radio/hermes/hermes.key | gpg --dearmor \
-  | sudo tee /etc/apt/trusted.gpg.d/hermes.gpg > /dev/null
-echo 'deb [arch=arm64] http://debian.hermes.radio/hermes trixie main' \
+wget --no-check-certificate -O /tmp/hermes.key https://debian.hermes.radio/hermes/hermes.key
+gpg --show-keys --with-fingerprint /tmp/hermes.key
+```
+
+Otisk musí být `EEE8 F00A D242 EC55 9266  7F75 EA13 67BE 5DD1 91BB`. Pokud
+nesouhlasí, nepokračujte a použijte překlad ze zdrojů níže. Při shodě klíč
+nainstalujte jen pro tento repozitář (`signed-by`):
+
+```bash
+sudo install -d -m 755 /etc/apt/keyrings
+gpg --dearmor < /tmp/hermes.key | sudo tee /etc/apt/keyrings/hermes.gpg > /dev/null
+echo 'deb [arch=arm64 signed-by=/etc/apt/keyrings/hermes.gpg] http://debian.hermes.radio/hermes trixie main' \
   | sudo tee /etc/apt/sources.list.d/hermes.list
 sudo apt update
 sudo apt install -y mercury
@@ -719,3 +731,327 @@ programy na desktopu.
 
 > **Poznámka:** Gateway (kapitoly 2–7) zatím nepředává zprávy mezi MeshCom a
 > VarAC; záložka VarAC slouží jen ke spouštění a sledování programů.
+
+## 12. LoRa TNC a LinBPQ s BBS a e-mailovou bránou (experimentální)
+
+Tato kapitola přidává na Raspberry Pi packet radio uzel **LinBPQ** (G8BPQ) s
+BBS a jako rádiové porty **dva LoRa KISS TNC (TNC1 a TNC2)** s moduly SX127x
+(RFM96/RFM98) na SPI, například na desce OK2ZAW se dvěma moduly. TNC je
+upravená kopie projektu
+[IZ7BOJ/RPi-LoRa-KISS-TNC-2ndgen, větev Lora-Packet](https://github.com/IZ7BOJ/RPi-LoRa-KISS-TNC-2ndgen/tree/Lora-Packet)
+ve složce [`lora_tnc/`](lora_tnc/README.md) tohoto projektu (seznam úprav je
+v jejím README). Instaluje se tedy spolu s gateway a nic dalšího se pro TNC
+nestahuje.
+
+BBS je napojena na místní Postfix z kapitoly 8:
+
+- uživatelé BBS posílají e-maily na internetové adresy – BPQMail je předá
+  Postfixu, ten přes relay vlastního serveru,
+- pošta pro uživatele BBS se z Postfixu doručí do SMTP serveru BPQMail,
+- volitelně se kopie pošty z místní schránky (Maildir) doručuje i do BBS
+  (krok 12.7).
+
+LinBPQ neumí číst Maildir přímo – má vlastní úložiště zpráv. Propojení proto
+vede přes SMTP. Postup předpokládá hotovou kapitolu 8 (Postfix s relayem).
+
+```text
+LoRa modul 1 ⇄ TNC1 (KISS TCP 127.0.0.1:10001) ⇄ ┐
+LoRa modul 2 ⇄ TNC2 (KISS TCP 127.0.0.1:10002) ⇄ ┴ LinBPQ + BBS
+                                                      ⇅ SMTP
+            internet ⇄ relay vlastního serveru ⇄ Postfix ⇄ Maildir
+```
+
+### 12.1 Zapnutí SPI a závislosti TNC
+
+```bash
+sudo raspi-config nonint do_spi 0
+sudo apt install -y python3 python3-spidev python3-rpi-lgpio
+sudo usermod -aG spi,gpio pi
+sudo reboot
+```
+
+Po restartu ověřte SPI zařízení (dvě hodnoty chip select = dva moduly na
+sběrnici 0):
+
+```bash
+ls /dev/spidev0.*
+```
+
+> **Raspberry Pi 5:** knihovna `RPi.GPIO` (balík `python3-rpi.gpio`) na Pi 5
+> nefunguje. `python3-rpi-lgpio` je náhrada se stejným rozhraním; oba balíčky
+> nelze mít nainstalované současně. Pokud je starý balík nainstalovaný, apt
+> ho při instalaci `python3-rpi-lgpio` odebere.
+
+Knihovny pro OLED displej (`adafruit-circuitpython-ssd1306`) nejsou potřeba;
+displej je v kopii TNC vypnutý.
+
+### 12.2 Nastavení TNC1 a TNC2 ve webu
+
+Na záložce **BPQ** webu gateway nastavte každý TNC zvlášť:
+
+| Položka | TNC1 | TNC2 | Poznámka |
+| --- | --- | --- | --- |
+| KISS TCP adresa | `127.0.0.1` | `127.0.0.1` | jen pro LinBPQ na tomto Pi |
+| KISS TCP port | `10001` | `10002` | musí se lišit |
+| IRQ pin (DIO0, BCM) | `5` | `19` | deska OK2ZAW |
+| SPI sběrnice / chip select | `0` / `0` | `0` / `1` | podle zapojení desky |
+| Kmitočet, SF, šířka pásma, CR, sync word | podle sítě | podle sítě | shodné s protistanicemi |
+
+1. Zaškrtněte **TNC je osazen** u každého použitého modulu a vyplňte
+   **kmitočet** – bez něj web službu nevytvoří (ochrana před vysíláním na
+   nechtěném kmitočtu).
+2. Volitelně zaškrtněte start po spuštění Pi a zpoždění.
+3. Uložte. Web zapíše nastavení do `~/.config/meshcom/tnc1.json` a
+   `tnc2.json` a vytvoří služby `meshcom-tnc1` a `meshcom-tnc2`.
+4. Tlačítkem **Spustit** spusťte TNC a ve výpisu ověřte, že poslouchá:
+
+   ```bash
+   ss -ltn | grep -E '1000[12]'
+   journalctl --user -u meshcom-tnc1 -n 30
+   ```
+
+Důležité:
+
+- Kopie TNC vždy používá standardní AX.25 rámce a nepřidává k nim signálový
+  report (`appendSignalReport = False`) – jinak by se rozbily spojené relace.
+- Kmitočet volte podle povolení a band plánu. Nepoužívejte kmitočet LoRa APRS
+  (433,775 MHz) ani MeshCom (433,175 MHz). Pokud oba TNC pracují v jednom
+  pásmu, volte dostatečný odstup kmitočtů, aby se moduly navzájem nerušily.
+- Při SF12/BW125 je přenosová rychlost jen kolem 300 bit/s – BBS je vhodná pro
+  krátké textové zprávy.
+- Výkon `0–15` odpovídá 2–17 dBm (modul SX127x s PA_BOOST).
+
+### 12.3 Instalace LinBPQ
+
+Použijte oficiální instalační skript autora (G8BPQ), který stáhne verzi pro
+Raspberry Pi do `/home/pi/linbpq`. Spusťte jako `pi`:
+
+```bash
+cd /home/pi
+wget https://www.cantab.net/users/john.wiseman/Downloads/installLinBPQ
+less installLinBPQ        # projděte, co skript dělá
+chmod +x installLinBPQ
+./installLinBPQ
+ls -l /home/pi/linbpq/
+```
+
+Pokud chybí knihovna `libconfig`, doinstalujte ji (`sudo apt install libconfig9`
+nebo `libconfig11` podle verze systému). Pokud skript nebo nástroj
+`bpq-config` vytvořil systémovou službu `bpq.service`, vypněte ji – LinBPQ
+bude spouštět záložka BPQ a dvě instance by se praly o porty:
+
+```bash
+sudo systemctl disable --now bpq.service 2>/dev/null || true
+```
+
+### 12.4 Základní konfigurace `bpq32.cfg`
+
+Vytvořte `/home/pi/linbpq/bpq32.cfg` (volací znaky, lokátor a hesla upravte).
+Každý TNC je v LinBPQ samostatný port s vlastním TCP portem:
+
+```text
+SIMPLE
+NODECALL=OK2ZAW-7
+NODEALIAS=ZAWNOD
+LOCATOR=JN89AA
+INFOMSG:
+OK2ZAW-7 LinBPQ uzel s BBS pres LoRa
+***
+
+PORT
+ PORTNUM=1
+ ID=Telnet a web
+ DRIVER=TELNET
+ CONFIG
+  LOGGINGLEVEL=1
+  HTTPPORT=8008
+  TCPPORT=8010
+  MAXSESSIONS=10
+  USER=sysop,SILNE_HESLO,OK2ZAW,,SYSOP
+ENDPORT
+
+PORT
+ PORTNUM=2
+ ID=LoRa TNC1
+ TYPE=ASYNC
+ PROTOCOL=KISS
+ IPADDR=127.0.0.1
+ TCPPORT=10001
+ CHANNEL=A
+ PACLEN=128
+ MAXFRAME=1
+ FRACK=20000
+ RESPTIME=3000
+ RETRIES=10
+ENDPORT
+
+PORT
+ PORTNUM=3
+ ID=LoRa TNC2
+ TYPE=ASYNC
+ PROTOCOL=KISS
+ IPADDR=127.0.0.1
+ TCPPORT=10002
+ CHANNEL=A
+ PACLEN=128
+ MAXFRAME=1
+ FRACK=20000
+ RESPTIME=3000
+ RETRIES=10
+ENDPORT
+
+APPLICATION 1,BBS,,OK2ZAW-1,ZAWBBS,255
+LINMAIL
+```
+
+- `IPADDR` a `TCPPORT` místo `COMPORT` připojí KISS port přes TCP k TNC;
+  `TCPPORT` musí odpovídat portu TNC1/TNC2 na záložce BPQ.
+- TNC přijímá vždy jen jedno TCP spojení – k jednomu TNC se smí připojit jen
+  LinBPQ, ne současně další program (aprx, Direwolf).
+- `FRACK=20000` (ms) a `MAXFRAME=1` odpovídají pomalému LoRa kanálu; hodnoty
+  dolaďte podle zkušeností z provozu.
+- `LINMAIL` zapne poštovní server (BBS); `APPLICATION` zpřístupní BBS pod
+  volacím znakem `OK2ZAW-1`.
+- Web LinBPQ (8008) a telnet (8010) zpřístupněte jen v LAN/VPN.
+
+Vyzkoušejte ruční spuštění (nejdřív musí běžet TNC z kroku 12.2), otevřete
+`http://<IP-Raspberry-Pi>:8008/` a pak LinBPQ ukončete Ctrl+C:
+
+```bash
+cd /home/pi/linbpq && ./linbpq
+```
+
+### 12.5 Spouštění ze záložky BPQ
+
+Záložka **BPQ** ve webu gateway spouští, zastavuje a restartuje TNC1, TNC2 a
+LinBPQ, zobrazuje jejich stav a výpis a nastavuje start po spuštění Raspberry
+Pi se zpožděním. LinBPQ se vždy spouští až po obou TNC. Na rozdíl od VARA a
+VarAC nepotřebují přihlášený desktop.
+
+1. Povolte uživatelský systemd bez přihlášení (stačí jednou, viz i 11.10):
+
+   ```bash
+   sudo loginctl enable-linger pi
+   ```
+
+2. Na záložce **BPQ** zkontrolujte cestu k LinBPQ (`/home/pi/linbpq/linbpq`),
+   zaškrtněte automatický start, nastavte zpoždění (např. TNC 0 s,
+   LinBPQ 15 s) a uložte.
+3. Tlačítkem **Spustit** spusťte TNC a potom LinBPQ. Po změně nastavení
+   běžící služby restartujte tlačítkem **Restart**.
+
+Ruční kontrola:
+
+```bash
+systemctl --user status meshcom-tnc1 meshcom-tnc2 meshcom-linbpq
+journalctl --user -u meshcom-linbpq -n 50
+```
+
+Pokud jste dříve podle starší verze návodu vytvořili službu
+`meshcom-lora-tnc` nebo složku `~/RPi-LoRa-KISS-TNC`, odstraňte je:
+
+```bash
+systemctl --user disable --now meshcom-lora-tnc 2>/dev/null || true
+rm -f ~/.config/systemd/user/meshcom-lora-tnc.service
+systemctl --user daemon-reload
+```
+
+### 12.6 BBS a e-mailová brána přes Postfix
+
+Nastavení pošty se dělá ve webu LinBPQ (`http://<IP-Pi>:8008/` → *Mail Mgmt*
+→ *Configuration*). Názvy položek se mohou mezi verzemi LinBPQ mírně lišit.
+
+1. **SMTP a POP3 server BPQMail:** nastavte SMTP port `8025` a POP3 port `8110`
+   (port 25 už používá Postfix). Vzdálený přístup (*Enable Remote Access*)
+   nechte vypnutý – Postfix se připojuje z `127.0.0.1`.
+2. **Doména BBS:** jako vlastní doménu BBS (*My Domain*) nastavte např.
+   `bbs.lan`. Uživatelé BBS pak mají e-mailové adresy `<znacka>@bbs.lan`.
+3. **Odchozí pošta na internet (ISP Gateway):** zapněte bránu, jako SMTP
+   server zadejte `127.0.0.1`, port `25`, bez přihlášení. Postfix ji předá
+   dál přes relay z kapitoly 8. Pokud verze vyžaduje POP3 účet poskytovatele,
+   ponechte příjem přes POP3 vypnutý – příchozí poštu doručuje Postfix.
+4. **Uživatelé:** v *Mail Mgmt* → *Users* povolte uživatelům odesílání na
+   internet, pokud to vaše verze vyžaduje, a nastavte jim heslo (slouží i pro
+   přístup mailovým klientem přes POP3/SMTP BPQMail).
+
+Postfixu řekněte, že doména `bbs.lan` se doručuje do BPQMail:
+
+```bash
+echo 'bbs.lan smtp:[127.0.0.1]:8025' | sudo tee /etc/postfix/transport
+sudo postmap /etc/postfix/transport
+sudo postconf -e 'transport_maps = hash:/etc/postfix/transport'
+sudo postconf -e 'relay_domains = bbs.lan'
+```
+
+Kapitola 8 vyžaduje TLS pro všechna odchozí SMTP spojení
+(`smtp_tls_security_level = encrypt`), BPQMail ale TLS nepodporuje. Výjimku
+nastavte jen pro místní spojení do BPQ; relay na veřejný server zůstává
+šifrovaný:
+
+```bash
+echo '[127.0.0.1]:8025 none' | sudo tee /etc/postfix/tls_policy
+sudo postmap /etc/postfix/tls_policy
+sudo postconf -e 'smtp_tls_policy_maps = hash:/etc/postfix/tls_policy'
+sudo systemctl reload postfix
+```
+
+Otestujte doručení z Pi do BBS a odeslání z BBS ven:
+
+```bash
+printf 'Subject: Test do BBS\n\nZprava z Postfixu.\n' | sendmail ok2zaw@bbs.lan
+journalctl -u postfix -n 20
+```
+
+Zpráva se má objevit v BBS (`L` / `R <číslo>` po připojení k BBS). Pak
+z BBS pošlete zprávu `SP vas.ucet@example.com` a ověřte, že ji Postfix
+předal relayi. Odpovědi z internetu na adresu `@bbs.lan` přímo nedojdou –
+Pi není veřejný mailserver; příchozí poštu do BBS řeší krok 12.7.
+
+### 12.7 Volitelně: kopie místní schránky do BBS
+
+Pokud mají e-maily stažené getmail6 do místní schránky (kapitola 8) být
+dostupné i na BBS, nechte getmail doručovat přes Postfix a ten je zkopíruje
+uživateli BBS:
+
+1. Postfix bude doručovat místní poštu do `~/Maildir/` (stejný Maildir, který
+   používá Dovecot):
+
+   ```bash
+   sudo postconf -e 'home_mailbox = Maildir/'
+   ```
+
+2. Do `/etc/aliases` přidejte řádek (zpětné lomítko zabrání smyčce):
+
+   ```text
+   pi: \pi, ok2zaw@bbs.lan
+   ```
+
+   ```bash
+   sudo newaliases
+   sudo systemctl reload postfix
+   ```
+
+3. V `~/.getmail/getmailrc` nahraďte sekci `[destination]`:
+
+   ```ini
+   [destination]
+   type = MDA_external
+   path = /usr/sbin/sendmail
+   arguments = ("-i", "-f", "%(sender)", "pi")
+   ```
+
+Každá stažená zpráva pak přistane v místní schránce i v BBS u uživatele
+`OK2ZAW`. Dlouhé zprávy a přílohy přes LoRa nečtěte – kanál je velmi pomalý.
+
+### 12.8 Řešení problémů
+
+| Problém | Řešení |
+| --- | --- |
+| TNC hlásí chybu GPIO / `RuntimeError` | na Pi 5 musí být `python3-rpi-lgpio`, ne `python3-rpi.gpio`; zkontrolujte IRQ pin (TNC1 = 5, TNC2 = 19) a členství ve skupinách `spi`, `gpio` |
+| `/dev/spidev0.0` neexistuje | `sudo raspi-config nonint do_spi 0` a restart |
+| LinBPQ se nepřipojí k TNC | `ss -ltn \| grep -E '1000[12]'`; TNC musí běžet dřív než LinBPQ a `TCPPORT` v `bpq32.cfg` musí odpovídat portu TNC |
+| TNC nepřijímá nic, druhý funguje | zkontrolujte chip select (TNC1 = 0, TNC2 = 1) a IRQ pin; oba TNC nesmí mít stejné hodnoty |
+| Web nevytvoří službu TNC | vyplňte kmitočet a zkontrolujte hlášení po uložení |
+| Spojení přes LoRa se rozpadá | zvyšte `FRACK`, snižte `PACLEN`, `MAXFRAME=1`; ověřte stejné LoRa parametry protistanice |
+| Pošta do BBS nedojde | `journalctl -u postfix`; SMTP port BPQMail (`ss -ltn \| grep 8025`), doména v `transport` |
+| Záložka BPQ hlásí, že služba není vytvořená | povolte TNC (TNC je osazen) a uložte nastavení na záložce BPQ |
