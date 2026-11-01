@@ -143,6 +143,30 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .card-sub { margin-top: 0.2rem; color: var(--text-muted); font-size: 11px; }
 .monitor-note { margin: -0.75rem 0 1.5rem; color: var(--text-muted); font-size: 11px; }
 
+.station-filter {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 1.25rem;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.station-filter label { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; }
+.station-filter input { min-height: 30px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font-size: 12px; }
+.station-filter button { min-height: 30px; padding: 0.35rem 0.8rem; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; font-size: 12px; font-weight: 600; }
+.station-filter button:hover { background: var(--accent-hover); }
+.table-wrap { width: 100%; overflow-x: auto; }
+.station-table { min-width: 1180px; }
+.station-table td { white-space: nowrap; }
+.station-table td:nth-child(5) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.station-table a, .clear-filter { color: var(--accent-text); text-decoration: none; }
+.station-table a:hover, .clear-filter:hover { text-decoration: underline; }
+.clear-filter { margin-left: 8px; font-family: "Montserrat", "Segoe UI", sans-serif; font-size: 11px; font-weight: 500; }
+
 .send-panel {
   margin: 1.5rem 0;
   padding: 14px 16px;

@@ -26,6 +26,8 @@ protokol s JSON zprávami; výchozí port je `1799`.
 	stránka se obnovuje každých 10 sekund. Obsah paketů se neukládá.
 - Ruční odeslání zprávy ze stavové stránky do nakonfigurované MeshCom skupiny,
 	validace délky, CSRF ochrana a záznam v historii.
+- RF tabulka a časová historie stanic z příchozích ExtUDP rámců `pos`, `msg` a
+	`tele` s `src_type=lora`; zahrnuje signál, polohu a dostupná metadata.
 - SQLite historie zpráv a chyb, heartbeat gateway a systemd služby pro gateway
 	i web. Systemd restartuje proces po chybovém ukončení.
 - Základní testy UDP monitoru, převodu zpráv, Maildir, konfigurace a validace

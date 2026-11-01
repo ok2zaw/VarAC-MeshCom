@@ -23,6 +23,7 @@ import hmac
 import os
 import secrets
 import time
+from datetime import date, datetime, time as datetime_time, timedelta
 from functools import wraps
 
 from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
@@ -171,6 +172,45 @@ def messages():
     total_pages = max((counts["total"] + per_page - 1) // per_page, 1)
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
+    )
+
+
+@app.route("/stations")
+@requires_auth
+def stations():
+    today = date.today()
+    default_start = (today - timedelta(days=29)).isoformat()
+    start_value = request.args.get("start", default_start)
+    end_value = request.args.get("end", today.isoformat())
+    try:
+        start_day = date.fromisoformat(start_value)
+        end_day = date.fromisoformat(end_value)
+    except ValueError:
+        abort(400, description="Neplatný formát data; použijte RRRR-MM-DD.")
+    if start_day > end_day:
+        abort(400, description="Datum od musí být před datem do.")
+
+    since = datetime.combine(start_day, datetime_time.min).timestamp()
+    until = datetime.combine(end_day + timedelta(days=1), datetime_time.min).timestamp()
+    selected_station = request.args.get("station", "").strip().upper()
+    summary = common.get_station_summary(since, until)
+    history_count = common.count_station_history(since, until, selected_station)
+    history = common.get_station_history(since, until, selected_station, limit=500)
+
+    for row in summary:
+        row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
+    for row in history:
+        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
+
+    return render_template(
+        "stations.html",
+        summary=summary,
+        history=history,
+        history_count=history_count,
+        selected_station=selected_station,
+        start_date=start_day.isoformat(),
+        end_date=end_day.isoformat(),
     )
 
 

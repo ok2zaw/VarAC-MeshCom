@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from email.message import EmailMessage
 from unittest.mock import patch
 
@@ -10,6 +11,83 @@ import webapp
 
 
 class GatewayEmailTests(unittest.TestCase):
+    def test_station_page_applies_inclusive_date_filter(self):
+        with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
+             patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
+             patch.object(webapp.common, "count_station_history", return_value=0) as count_history, \
+             patch.object(webapp.common, "get_station_history", return_value=[]) as history:
+            response = webapp.app.test_client().get(
+                "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        expected_start = datetime(2026, 10, 1).timestamp()
+        expected_end = datetime(2026, 10, 31).timestamp()
+        summary.assert_called_once_with(expected_start, expected_end)
+        count_history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1")
+        history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1", limit=500)
+
+    def test_station_observations_store_rf_position_signal_and_telemetry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+                common.init_db()
+                position = {
+                    "src_type": "lora",
+                    "type": "pos",
+                    "src": "OK1AAA-1,OK2BBB-2",
+                    "msg_id": "0123ABCD",
+                    "lat": 50.1,
+                    "lat_dir": "N",
+                    "long": 14.4,
+                    "long_dir": "E",
+                    "alt": 240,
+                    "batt": 85,
+                    "rssi": -91,
+                    "snr": 7,
+                    "max_hop": 3,
+                    "firmware": 40,
+                }
+                telemetry = {
+                    "src_type": "lora",
+                    "type": "tele",
+                    "src": "OK1AAA-1,OK2BBB-2",
+                    "temp1": 18.5,
+                    "hum": 62,
+                    "qnh": 1018.2,
+                }
+                no_fix = {
+                    **position,
+                    "src": "OK3CCC-1",
+                    "msg_id": "0123ABCE",
+                    "lat": 0,
+                    "long": 0,
+                }
+
+                self.assertTrue(common.record_station_observation(position, "OK9NODE-1"))
+                self.assertTrue(common.record_station_observation(telemetry, "OK9NODE-1"))
+                self.assertTrue(common.record_station_observation(no_fix, "OK9NODE-1"))
+                self.assertFalse(common.record_station_observation(
+                    {**position, "src_type": "udp"}, "OK9NODE-1"
+                ))
+                self.assertFalse(common.record_station_observation(
+                    {**position, "type": []}, "OK9NODE-1"
+                ))
+                self.assertFalse(common.record_station_observation(position, "OK1AAA-1"))
+
+                summary = common.get_station_summary(0, 4_102_444_800)
+                history = common.get_station_history(0, 4_102_444_800, "OK1AAA-1")
+
+        self.assertEqual(len(summary), 2)
+        stations = {row["station"]: row for row in summary}
+        self.assertEqual(stations["OK1AAA-1"]["heard_from"], "OK2BBB-2")
+        self.assertEqual(stations["OK1AAA-1"]["rssi"], -91)
+        self.assertEqual(stations["OK1AAA-1"]["latitude"], 50.1)
+        self.assertEqual(stations["OK1AAA-1"]["battery_percent"], 85)
+        self.assertEqual(stations["OK1AAA-1"]["temp1"], 18.5)
+        self.assertEqual(stations["OK1AAA-1"]["humidity"], 62)
+        self.assertIsNone(stations["OK3CCC-1"]["latitude"])
+        self.assertEqual(len(history), 2)
+
     def test_web_send_transmits_to_configured_group_and_logs_message(self):
         cfg = {
             "web_password": "",

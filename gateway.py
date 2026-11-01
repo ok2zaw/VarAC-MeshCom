@@ -126,9 +126,16 @@ def udp_listener():
             update_udp_monitor("rx", peer, "neplatná struktura", "JSON paket není objekt.", count_datagram=False)
             continue
 
+        recorded_station = False
+        try:
+            recorded_station = common.record_station_observation(packet, cfg.get("callsign", ""))
+        except sqlite3.Error as exc:
+            log.warning("Could not record RF station observation: %s", exc)
+
         if packet.get("type") != "msg":
-            update_udp_monitor("rx", peer, "ignorován jiný typ", count_datagram=False)
-            continue  # ignore pos/tele packets
+            status = "RF pozorování" if recorded_station else "ignorován jiný typ"
+            update_udp_monitor("rx", peer, status, count_datagram=False)
+            continue
 
         dst = str(packet.get("dst", ""))
         if dst != str(cfg["mesh_group"]):

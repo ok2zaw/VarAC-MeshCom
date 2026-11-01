@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}RF stanice – MeshCom Gateway{% endblock %}
+{% block content %}
+{% macro telemetry_values(row) -%}
+  {%- set values = [] -%}
+  {%- if row.temp1 is not none -%}{%- set _ = values.append("T1 " ~ row.temp1 ~ " °C") -%}{%- endif -%}
+  {%- if row.temp2 is not none -%}{%- set _ = values.append("T2 " ~ row.temp2 ~ " °C") -%}{%- endif -%}
+  {%- if row.humidity is not none -%}{%- set _ = values.append("H " ~ row.humidity ~ " %") -%}{%- endif -%}
+  {%- if row.qfe is not none -%}{%- set _ = values.append("QFE " ~ row.qfe ~ " hPa") -%}{%- endif -%}
+  {%- if row.qnh is not none -%}{%- set _ = values.append("QNH " ~ row.qnh ~ " hPa") -%}{%- endif -%}
+  {%- if row.gas is not none -%}{%- set _ = values.append("Gas " ~ row.gas) -%}{%- endif -%}
+  {%- if row.co2 is not none -%}{%- set _ = values.append("CO2 " ~ row.co2) -%}{%- endif -%}
+  {%- if row.pressure_alt is not none -%}{%- set _ = values.append("P-alt " ~ row.pressure_alt ~ " m") -%}{%- endif -%}
+  {%- if row.digital_inputs is not none -%}{%- set _ = values.append("DIN " ~ row.digital_inputs) -%}{%- endif -%}
+  {{ values|join("; ") if values else "—" }}
+{%- endmacro %}
+
+<h1>RF stanice</h1>
+<p class="monitor-note">Záznamy obsahují pouze rámce přijaté přes LoRa. Text zpráv se do historie stanic neukládá. RSSI/SNR se vztahuje k přijatému RF hopu; jednotka výšky závisí na vysílajícím uzlu.</p>
+
+<form method="get" class="station-filter">
+  <label>Od
+    <input type="date" name="start" value="{{ start_date }}" required>
+  </label>
+  <label>Do
+    <input type="date" name="end" value="{{ end_date }}" required>
+  </label>
+  {% if selected_station %}<input type="hidden" name="station" value="{{ selected_station }}">{% endif %}
+  <button type="submit">Filtrovat</button>
+</form>
+
+<h2>Stanice v období</h2>
+<div class="table-wrap">
+  <table class="msg-table station-table">
+    <thead>
+      <tr>
+        <th>Stanice</th><th>Přijato přes</th><th>Rámce</th><th>Poprvé</th><th>Naposledy</th><th>Typ</th>
+        <th>RSSI</th><th>SNR</th><th>Poloha</th><th>Alt. raw</th><th>Baterie</th>
+        <th>Zbývá hopů / LoRa</th><th>Firmware</th><th>Telemetry</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in summary %}
+      <tr>
+        <td><a href="{{ url_for('stations', start=start_date, end=end_date, station=row.station) }}#station-history">{{ row.station }}</a></td>
+        <td title="{{ row.source_path }}">{{ row.heard_from }}</td>
+        <td>{{ row.observations }}</td>
+        <td>{{ row.first_seen_label }}</td>
+        <td>{{ row.last_seen_label }}</td>
+        <td>{{ row.last_packet_type }}</td>
+        <td>{% if row.rssi is not none %}{{ row.rssi }} dBm{% else %}—{% endif %}</td>
+        <td>{% if row.snr is not none %}{{ row.snr }} dB{% else %}—{% endif %}</td>
+        <td>{% if row.latitude is not none and row.longitude is not none %}{{ '%.4f'|format(row.latitude) }}, {{ '%.4f'|format(row.longitude) }}{% else %}—{% endif %}</td>
+        <td>{{ row.altitude if row.altitude is not none else '—' }}</td>
+        <td>{% if row.battery_percent is not none %}{{ row.battery_percent }} %{% else %}—{% endif %}</td>
+        <td>{% if row.max_hop is not none %}{{ row.max_hop }}{% else %}—{% endif %}{% if row.lora_mod is not none %} / {{ row.lora_mod }}{% endif %}</td>
+        <td>{% if row.firmware is not none %}{{ row.firmware }}{{ row.fw_sub or '' }}{% else %}—{% endif %}</td>
+        <td>{{ telemetry_values(row) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="14">V tomto období zatím nejsou žádná RF pozorování.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 id="station-history">Historie{% if selected_station %}: {{ selected_station }} <a class="clear-filter" href="{{ url_for('stations', start=start_date, end=end_date) }}">zobrazit všechny</a>{% endif %}</h2>
+<p class="card-sub">{{ history_count }} záznamů v období; zobrazeno nejvýše 500 nejnovějších.</p>
+<div class="table-wrap">
+  <table class="msg-table station-table">
+    <thead>
+      <tr><th>Čas</th><th>Stanice</th><th>Typ</th><th>RF hop</th><th>Cesta</th><th>RSSI</th><th>SNR</th><th>Poloha</th><th>Alt. raw</th><th>Baterie</th><th>Zbývá hopů / LoRa</th><th>Firmware</th><th>Telemetry</th></tr>
+    </thead>
+    <tbody>
+      {% for row in history %}
+      <tr>
+        <td>{{ row.observed_at_label }}</td>
+        <td>{{ row.station }}</td>
+        <td>{{ row.packet_type }}</td>
+        <td>{{ row.heard_from }}</td>
+        <td title="{{ row.source_path }}">{{ row.source_path }}</td>
+        <td>{% if row.rssi is not none %}{{ row.rssi }} dBm{% else %}—{% endif %}</td>
+        <td>{% if row.snr is not none %}{{ row.snr }} dB{% else %}—{% endif %}</td>
+        <td>{% if row.latitude is not none and row.longitude is not none %}{{ '%.4f'|format(row.latitude) }}, {{ '%.4f'|format(row.longitude) }}{% else %}—{% endif %}</td>
+        <td>{{ row.altitude if row.altitude is not none else '—' }}</td>
+        <td>{% if row.battery_percent is not none %}{{ row.battery_percent }} %{% else %}—{% endif %}</td>
+        <td>{% if row.max_hop is not none %}{{ row.max_hop }}{% else %}—{% endif %}{% if row.lora_mod is not none %} / {{ row.lora_mod }}{% endif %}</td>
+        <td>{% if row.firmware is not none %}{{ row.firmware }}{{ row.fw_sub or '' }}{% else %}—{% endif %}</td>
+        <td>{{ telemetry_values(row) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="13">Historie pro zvolený filtr je prázdná.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -6,6 +6,7 @@ this module so they always see the same configuration and message log.
 """
 
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -211,6 +212,47 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS station_observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                observed_at REAL NOT NULL,
+                station TEXT NOT NULL,
+                heard_from TEXT NOT NULL,
+                source_path TEXT NOT NULL,
+                src_type TEXT NOT NULL,
+                packet_type TEXT NOT NULL,
+                msg_id TEXT,
+                rssi INTEGER,
+                snr INTEGER,
+                latitude REAL,
+                longitude REAL,
+                altitude REAL,
+                battery_percent INTEGER,
+                lora_mod INTEGER,
+                max_hop INTEGER,
+                firmware TEXT,
+                fw_sub TEXT,
+                temp1 REAL,
+                temp2 REAL,
+                humidity REAL,
+                qfe REAL,
+                qnh REAL,
+                gas REAL,
+                co2 REAL,
+                pressure_alt REAL,
+                digital_inputs TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_station_observations_time "
+            "ON station_observations(observed_at DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_station_observations_station_time "
+            "ON station_observations(station, observed_at DESC)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -308,6 +350,200 @@ def get_udp_activity() -> dict:
         for row in rows:
             result[row["direction"]] = dict(row)
         return result
+    finally:
+        conn.close()
+
+
+def _station_number(packet: dict, key: str, integer: bool = False):
+    value = packet.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    if integer and not -(2 ** 31) <= number < 2 ** 31:
+        return None
+    return int(number) if integer else number
+
+
+def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
+    packet_type = packet.get("type")
+    if packet.get("src_type") != "lora" or not isinstance(packet_type, str) or packet_type not in {"pos", "msg", "tele"}:
+        return False
+
+    source_path = packet.get("src")
+    if not isinstance(source_path, str):
+        return False
+    path = [part.strip().upper() for part in source_path.split(",") if part.strip()]
+    own_callsign = str(own_callsign or "").strip().upper()
+    if not path or path[0] == own_callsign:
+        return False
+
+    latitude = _station_number(packet, "lat")
+    latitude_direction = str(packet.get("lat_dir", "")).upper()
+    if latitude is not None and latitude_direction in {"N", "S"}:
+        latitude = abs(latitude) * (-1 if latitude_direction == "S" else 1)
+    else:
+        latitude = None
+
+    longitude = _station_number(packet, "long")
+    longitude_direction = str(packet.get("long_dir", "")).upper()
+    if longitude is not None and longitude_direction in {"E", "W"}:
+        longitude = abs(longitude) * (-1 if longitude_direction == "W" else 1)
+    else:
+        longitude = None
+
+    if latitude is not None and not -90 <= latitude <= 90:
+        latitude = None
+    if longitude is not None and not -180 <= longitude <= 180:
+        longitude = None
+    if latitude == 0 and longitude == 0:
+        latitude = None
+        longitude = None
+
+    observation = {
+        "observed_at": time.time(),
+        "station": path[0],
+        "heard_from": path[-1],
+        "source_path": ",".join(path),
+        "src_type": "lora",
+        "packet_type": packet_type,
+        "msg_id": str(packet.get("msg_id", ""))[:32] or None,
+        "rssi": _station_number(packet, "rssi", integer=True),
+        "snr": _station_number(packet, "snr", integer=True),
+        "latitude": latitude,
+        "longitude": longitude,
+        "altitude": _station_number(packet, "alt"),
+        "battery_percent": _station_number(packet, "batt", integer=True),
+        "lora_mod": _station_number(packet, "lora_mod", integer=True),
+        "max_hop": _station_number(packet, "max_hop", integer=True),
+        "firmware": str(packet["firmware"])[:32] if packet.get("firmware") is not None else None,
+        "fw_sub": str(packet["fw_sub"])[:8] if packet.get("fw_sub") is not None else None,
+        "temp1": _station_number(packet, "temp1"),
+        "temp2": _station_number(packet, "temp2"),
+        "humidity": _station_number(packet, "hum"),
+        "qfe": _station_number(packet, "qfe"),
+        "qnh": _station_number(packet, "qnh"),
+        "gas": _station_number(packet, "gas"),
+        "co2": _station_number(packet, "co2"),
+        "pressure_alt": _station_number(packet, "pressure_alt"),
+        "digital_inputs": str(packet["din"])[:16] if packet.get("din") is not None else None,
+    }
+
+    conn = get_db()
+    try:
+        columns = ", ".join(observation)
+        placeholders = ", ".join(f":{column}" for column in observation)
+        conn.execute(
+            f"INSERT INTO station_observations ({columns}) VALUES ({placeholders})",
+            observation,
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_station_summary(since: float, until: float, limit: int = 500) -> list[dict]:
+    query = """
+        WITH filtered AS (
+            SELECT * FROM station_observations
+            WHERE observed_at >= ? AND observed_at < ?
+        ),
+        stats AS (
+            SELECT station, COUNT(*) AS observations,
+                   MIN(observed_at) AS first_seen, MAX(observed_at) AS last_seen
+            FROM filtered GROUP BY station
+        ),
+        latest AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (SELECT station, MAX(id) AS id FROM filtered GROUP BY station) AS newest
+              ON newest.id = item.id
+        ),
+        latest_signal AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (
+                SELECT station, MAX(id) AS id FROM filtered
+                WHERE rssi IS NOT NULL OR snr IS NOT NULL GROUP BY station
+            ) AS newest ON newest.id = item.id
+        ),
+        latest_position AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (
+                SELECT station, MAX(id) AS id FROM filtered
+                WHERE packet_type = 'pos' AND latitude IS NOT NULL AND longitude IS NOT NULL
+                GROUP BY station
+            ) AS newest ON newest.id = item.id
+        ),
+        latest_telemetry AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (
+                SELECT station, MAX(id) AS id FROM filtered
+                WHERE packet_type = 'tele' GROUP BY station
+            ) AS newest ON newest.id = item.id
+        )
+        SELECT stats.station, stats.observations, stats.first_seen, stats.last_seen,
+               latest.heard_from, latest.source_path, latest.packet_type AS last_packet_type,
+               latest_signal.rssi, latest_signal.snr,
+               latest_position.latitude, latest_position.longitude,
+               latest_position.altitude, latest_position.battery_percent,
+               latest_position.lora_mod, latest_position.max_hop,
+               latest_position.firmware, latest_position.fw_sub,
+               latest_telemetry.temp1, latest_telemetry.temp2,
+               latest_telemetry.humidity, latest_telemetry.qfe,
+               latest_telemetry.qnh, latest_telemetry.gas,
+               latest_telemetry.co2, latest_telemetry.pressure_alt,
+               latest_telemetry.digital_inputs
+        FROM stats
+        LEFT JOIN latest ON latest.station = stats.station
+        LEFT JOIN latest_signal ON latest_signal.station = stats.station
+        LEFT JOIN latest_position ON latest_position.station = stats.station
+        LEFT JOIN latest_telemetry ON latest_telemetry.station = stats.station
+        ORDER BY stats.last_seen DESC
+        LIMIT ?
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute(query, (since, until, max(1, min(limit, 1000)))).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_station_history(since: float, until: float, station: str = "",
+                        limit: int = 500, offset: int = 0) -> list[dict]:
+    query = (
+        "SELECT * FROM station_observations "
+        "WHERE observed_at >= ? AND observed_at < ?"
+    )
+    params = [since, until]
+    if station:
+        query += " AND station = ?"
+        params.append(station.strip().upper())
+    query += " ORDER BY observed_at DESC, id DESC LIMIT ? OFFSET ?"
+    params.extend((max(1, min(limit, 1000)), max(0, offset)))
+
+    conn = get_db()
+    try:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def count_station_history(since: float, until: float, station: str = "") -> int:
+    query = "SELECT COUNT(*) FROM station_observations WHERE observed_at >= ? AND observed_at < ?"
+    params = [since, until]
+    if station:
+        query += " AND station = ?"
+        params.append(station.strip().upper())
+
+    conn = get_db()
+    try:
+        return conn.execute(query, params).fetchone()[0]
     finally:
         conn.close()
 
