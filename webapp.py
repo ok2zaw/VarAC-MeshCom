@@ -19,15 +19,39 @@ config.json. Set web_password to empty string to disable auth (not
 recommended if the Pi is reachable from outside your LAN).
 """
 
+import hmac
+import os
+import secrets
 import time
 from functools import wraps
 
-from flask import Flask, request, redirect, url_for, render_template, Response
+from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
 
 import common
+import gateway
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("MESHCOM_FLASK_SECRET") or secrets.token_hex(32)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 common.init_db()
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if token is None:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def require_csrf_token():
+    expected = session.get("_csrf_token", "")
+    submitted = request.form.get("csrf_token", "")
+    if not expected or not submitted or not hmac.compare_digest(expected, submitted):
+        abort(400, description="Neplatný nebo chybějící bezpečnostní token.")
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
 
 
 def validate_config_values(form_data, cfg):
@@ -105,6 +129,38 @@ def status():
     )
 
 
+@app.route("/send", methods=["POST"])
+@requires_auth
+def send_message():
+    require_csrf_token()
+    cfg = common.load_config()
+    group = str(cfg.get("mesh_group", "")).strip()
+    message = request.form.get("message", "").strip()
+    max_length = int(cfg.get("max_mesh_payload", 150))
+
+    if not message:
+        flash("Zpráva nesmí být prázdná.", "error")
+    elif len(message) > max_length:
+        flash(f"Zpráva má {len(message)} znaků; limit pro MeshCom je {max_length}.", "error")
+    elif not group:
+        flash("Není nastavena cílová MeshCom skupina.", "error")
+    else:
+        try:
+            gateway.send_udp_message(cfg, group, message)
+        except OSError as exc:
+            common.log_message("web_to_mesh", group, "Web → MeshCom", message,
+                               status="error", error=str(exc))
+            flash(f"Odeslání do MeshCom selhalo: {exc}", "error")
+        else:
+            common.log_message("web_to_mesh", group, "Web → MeshCom", message)
+            flash(
+                f"UDP datagram byl předán k odeslání do skupiny {group}; MeshCom nepotvrzuje doručení.",
+                "success",
+            )
+
+    return redirect(url_for("status", _anchor="send-message"))
+
+
 @app.route("/messages")
 @requires_auth
 def messages():
@@ -125,6 +181,7 @@ def config_page():
     saved = False
     errors = {}
     if request.method == "POST":
+        require_csrf_token()
         new_cfg = dict(cfg)
         for key in (
             "mesh_node_ip", "mesh_group", "smtp_host", "smtp_user",

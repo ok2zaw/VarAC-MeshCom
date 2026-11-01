@@ -11,7 +11,7 @@
     {% for m in rows %}
     <tr class="{{ 'row-error' if m.status == 'error' else '' }}">
       <td>{{ m.ts }}</td>
-      <td>{{ '📶→✉️' if m.direction == 'mesh_to_email' else '✉️→📶' }}</td>
+      <td>{% if m.direction == 'mesh_to_email' %}MeshCom → e-mail{% elif m.direction == 'web_to_mesh' %}Web → MeshCom{% else %}e-mail → MeshCom{% endif %}</td>
       <td>{{ m.peer }}</td>
       <td>{{ m.subject }}</td>
       <td>{{ m.body }}</td>

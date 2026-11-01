@@ -10,6 +10,57 @@ import webapp
 
 
 class GatewayEmailTests(unittest.TestCase):
+    def test_web_send_transmits_to_configured_group_and_logs_message(self):
+        cfg = {
+            "web_password": "",
+            "mesh_group": "12345",
+            "max_mesh_payload": 20,
+            "mesh_node_ip": "192.168.1.50",
+            "mesh_udp_port": 1799,
+        }
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.gateway, "send_udp_message") as send_udp, \
+             patch.object(webapp.common, "log_message") as log_message:
+            with webapp.app.test_client() as client:
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                response = client.post(
+                    "/send",
+                    data={"csrf_token": "test-token", "message": "Maintenance starts"},
+                )
+
+        self.assertEqual(response.status_code, 302)
+        send_udp.assert_called_once_with(cfg, "12345", "Maintenance starts")
+        log_message.assert_called_once_with(
+            "web_to_mesh", "12345", "Web → MeshCom", "Maintenance starts"
+        )
+
+    def test_web_send_rejects_oversized_message(self):
+        cfg = {"web_password": "", "mesh_group": "12345", "max_mesh_payload": 5}
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.gateway, "send_udp_message") as send_udp:
+            with webapp.app.test_client() as client:
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                response = client.post(
+                    "/send",
+                    data={"csrf_token": "test-token", "message": "Too long"},
+                )
+
+        self.assertEqual(response.status_code, 302)
+        send_udp.assert_not_called()
+
+    def test_web_send_rejects_missing_csrf_token(self):
+        cfg = {"web_password": "", "mesh_group": "12345", "max_mesh_payload": 150}
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.gateway, "send_udp_message") as send_udp:
+            response = webapp.app.test_client().post(
+                "/send", data={"message": "Hello"}
+            )
+
+        self.assertEqual(response.status_code, 400)
+        send_udp.assert_not_called()
+
     def test_udp_monitor_tracks_datagrams_and_latest_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             database_path = os.path.join(tmpdir, "gateway.db")

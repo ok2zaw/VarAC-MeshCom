@@ -24,6 +24,8 @@ protokol s JSON zprávami; výchozí port je `1799`.
 	ochrana HTTP Basic Auth.
 - UDP monitor na stavové stránce: počty RX/TX, poslední protistrana a výsledek;
 	stránka se obnovuje každých 10 sekund. Obsah paketů se neukládá.
+- Ruční odeslání zprávy ze stavové stránky do nakonfigurované MeshCom skupiny,
+	validace délky, CSRF ochrana a záznam v historii.
 - SQLite historie zpráv a chyb, heartbeat gateway a systemd služby pro gateway
 	i web. Systemd restartuje proces po chybovém ukončení.
 - Základní testy UDP monitoru, převodu zpráv, Maildir, konfigurace a validace

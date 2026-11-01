@@ -1,5 +1,12 @@
 # Instalace a provoz MeshCom Gateway na Raspberry Pi / Debian
 
+> **Uživatelský účet:** Návod i `setup_rpi.sh` předpokládají účet `pi`. Pokud
+> používáte jiný účet, po instalaci a před spuštěním služeb nahraďte `pi` jeho
+> skutečným jménem v cestách `/home/pi`, ve vlastnictví `pi:pi`, v cestách Maildir
+> a v obou souborech `systemd/*.service`. V jednotkách upravte hlavně `User`,
+> `Group`, `WorkingDirectory`, `EnvironmentFile` a `ExecStart`. Poté spusťte
+> `sudo systemctl daemon-reload` a služby restartujte.
+
 Tento projekt je navržen jako obousměrná gateway mezi MeshCom a e-mailem. Důraz je kladen na jednoduchou a bezpečnou architekturu:
 
 - MeshCom komunikuje přes UDP na lokální síti
@@ -48,9 +55,36 @@ jméno jiného účtu, upravte `User`, `Group` a cesty v obou souborech v `syste
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Spusťte tyto příkazy jako uživatel `pi`, bez `sudo`. `sudo` patří k instalaci
+systémových balíčků (`apt`) a ke správě služeb, ne k instalaci balíčků do `.venv`.
+Skript `setup_rpi.sh` spuštěný jako root skončí s vysvětlením, aby nevytvořil
+virtuální prostředí vlastněné rootem.
+
+Pokud už instalace skončila chybou `Permission denied` uvnitř `.venv`, opravte
+vlastníka prostředí jednorázově:
+
+```bash
+sudo chown -R pi:pi /home/pi/meshcom-gateway/.venv
+```
+
+Potom jako `pi` znovu aktivujte prostředí a nainstalujte závislosti:
+
+```bash
+cd /home/pi/meshcom-gateway
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Pokud se při spuštění objeví `ModuleNotFoundError: No module named 'flask'`,
+znovu nainstalujte závislosti do projektového prostředí a ověřte import:
+
+```bash
+cd /home/pi/meshcom-gateway
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -c "import flask; print(flask.__version__)"
 ```
 
 ## 5. Konfigurace
@@ -98,15 +132,13 @@ Důležité:
 ## 6. Spuštění gateway
 
 ```bash
-source .venv/bin/activate
-python3 gateway.py
+.venv/bin/python gateway.py
 ```
 
 Webové rozhraní:
 
 ```bash
-source .venv/bin/activate
-python3 webapp.py
+.venv/bin/python webapp.py
 ```
 
 Web běží na portu 8899. Přístup je chráněn podle nastavení `web_username` a `web_password` v `config.json`.

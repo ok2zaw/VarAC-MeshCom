@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -eu
 
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Do not run setup_rpi.sh with sudo. Run it as pi; use sudo only for system packages and systemd."
+  exit 1
+fi
+
 PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$PROJECT_DIR"
 
@@ -16,9 +21,6 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 
 mkdir -p /home/pi/Maildir/new /home/pi/Maildir/cur /home/pi/Maildir/tmp
-if [ -d /home/pi ] && [ "$(id -u)" -eq 0 ]; then
-  chown -R pi:pi /home/pi/Maildir 2>/dev/null || true
-fi
 
 if [ ! -f .env ] && [ -f .env.example ]; then
   cp .env.example .env

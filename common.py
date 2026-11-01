@@ -252,6 +252,9 @@ def count_messages() -> dict:
         email_to_mesh = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE direction='email_to_mesh'"
         ).fetchone()["c"]
+        web_to_mesh = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE direction='web_to_mesh'"
+        ).fetchone()["c"]
         errors = conn.execute(
             "SELECT COUNT(*) AS c FROM messages WHERE status='error'"
         ).fetchone()["c"]
@@ -259,6 +262,7 @@ def count_messages() -> dict:
             "total": total,
             "mesh_to_email": mesh_to_email,
             "email_to_mesh": email_to_mesh,
+            "web_to_mesh": web_to_mesh,
             "errors": errors,
         }
     finally:

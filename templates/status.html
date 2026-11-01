@@ -31,6 +31,11 @@
     <div class="card-value">{{ counts.email_to_mesh }}</div>
   </div>
 
+  <div class="card">
+    <div class="card-label">Web → Mesh</div>
+    <div class="card-value">{{ counts.web_to_mesh }}</div>
+  </div>
+
   <div class="card {{ 'bad' if counts.errors else '' }}">
     <div class="card-label">Chyby</div>
     <div class="card-value">{{ counts.errors }}</div>
@@ -63,6 +68,22 @@
 
 <p class="monitor-note">Stránka se obnovuje každých 10 sekund. UDP nemá stav spojení; úspěšné lokální odeslání nepotvrzuje přijetí MeshCom uzlem.</p>
 
+<section class="send-panel" id="send-message" aria-labelledby="send-heading">
+  <div class="send-panel-heading">
+    <h2 id="send-heading">Odeslat zprávu</h2>
+    <p class="card-sub">Cílová skupina: <strong>{{ cfg.mesh_group }}</strong></p>
+  </div>
+  <form method="post" action="{{ url_for('send_message') }}" class="send-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="mesh-message">Text zprávy</label>
+    <textarea id="mesh-message" name="message" rows="3" maxlength="{{ cfg.max_mesh_payload }}" required></textarea>
+    <div class="send-form-footer">
+      <span class="hint">Maximum {{ cfg.max_mesh_payload }} znaků. Odesílá se přímo do skupiny.</span>
+      <button type="submit">Odeslat do MeshCom</button>
+    </div>
+  </form>
+</section>
+
 <h2>Posledních 10 zpráv</h2>
 <table class="msg-table">
   <thead>
@@ -72,7 +93,7 @@
     {% for m in recent %}
     <tr class="{{ 'row-error' if m.status == 'error' else '' }}">
       <td>{{ m.ts }}</td>
-      <td>{{ '📶→✉️' if m.direction == 'mesh_to_email' else '✉️→📶' }}</td>
+      <td>{% if m.direction == 'mesh_to_email' %}MeshCom → e-mail{% elif m.direction == 'web_to_mesh' %}Web → MeshCom{% else %}e-mail → MeshCom{% endif %}</td>
       <td>{{ m.peer }}</td>
       <td>{{ m.subject }}</td>
       <td>{{ '✅' if m.status == 'ok' else '⚠️ ' + (m.error or '') }}</td>

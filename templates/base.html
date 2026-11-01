@@ -29,6 +29,11 @@
   <button class="theme-toggle" type="button" aria-pressed="false">Tmavý režim</button>
 </nav>
 <main>
+{% with notices = get_flashed_messages(with_categories=true) %}
+  {% for category, message in notices %}
+  <div class="flash {{ category }}" role="{{ 'alert' if category == 'error' else 'status' }}">{{ message }}</div>
+  {% endfor %}
+{% endwith %}
 {% block content %}{% endblock %}
 </main>
 <script>

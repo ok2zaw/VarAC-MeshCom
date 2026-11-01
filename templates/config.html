@@ -17,6 +17,7 @@
 {% endif %}
 
 <form method="post" class="config-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <fieldset>
     <legend>MeshCom</legend>
     <label>IP adresa nodu

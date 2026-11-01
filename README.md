@@ -15,6 +15,8 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - Zobrazit stav gateway, historii a konfiguraci ve webovém rozhraní.
 - Sledovat počet UDP datagramů RX/TX, čas a protistranu poslední události a
 	poslední výsledek; stavová stránka se obnovuje každých 10 sekund.
+- Odeslat z webové stavové stránky provozní zprávu do nakonfigurované MeshCom
+	skupiny; délka se kontroluje a pokus se zaznamená do historie.
 - Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Konfigurace
