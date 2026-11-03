@@ -57,6 +57,29 @@ class RadioAppsTests(unittest.TestCase):
         self.assertEqual(radio_apps.mercury_port({"radio_mercury_args": "-x alsa -p8500"}), 8500)
         self.assertEqual(radio_apps.mercury_port({"radio_mercury_args": "-x alsa"}), 8300)
 
+    def test_mercury_web_gui_adds_flags_once(self):
+        cfg = {**self.cfg, "radio_mercury_args": "-x alsa -p 8400", "radio_mercury_gui": True,
+               "radio_mercury_gui_port": 10500, "radio_mercury_no_waterfall": True}
+        with patch.object(radio_apps.shutil, "which", return_value="/usr/bin/mercury"):
+            command = radio_apps.app_command("mercury", cfg)
+            self.assertEqual(command, ["mercury", "-x", "alsa", "-p", "8400", "-G", "-U", "10500", "-W"])
+            explicit = radio_apps.app_command("mercury", {**cfg, "radio_mercury_args": "-G -U 11000"})
+        self.assertEqual(explicit, ["mercury", "-G", "-U", "11000", "-W"])
+        self.assertEqual(radio_apps.mercury_gui_port({**cfg, "radio_mercury_args": "-U 11000"}), 11000)
+        with patch.object(radio_apps.shutil, "which", return_value="/usr/bin/mercury"):
+            plain = radio_apps.app_command("mercury", {**cfg, "radio_mercury_gui": False})
+        self.assertNotIn("-G", plain)
+
+    def test_mercury_gui_port_must_not_clash_with_modem_port(self):
+        form = {**{key: self.cfg[key] for key in webapp.RADIO_TEXT_FIELDS},
+                "radio_mercury_args": "-p 8400", "radio_vara_delay": "0", "radio_mercury_delay": "0",
+                "radio_varac_delay": "0", "radio_mercury_gui": "on", "radio_mercury_gui_port": "8401"}
+        _, errors = webapp.save_radio_settings(form, self.cfg)
+        self.assertEqual(len(errors), 1)
+        new_cfg, errors = webapp.save_radio_settings({**form, "radio_mercury_gui_port": "10080"}, self.cfg)
+        self.assertEqual(errors, [])
+        self.assertTrue(new_cfg["radio_mercury_gui"])
+
     def test_wine_path_must_exist_and_be_exe(self):
         for path in ("/tmp/script.sh", os.path.join(self.tmp.name, "missing.exe")):
             with self.assertRaises(radio_apps.RadioError):
@@ -108,7 +131,8 @@ class RadioAppsTests(unittest.TestCase):
     def test_web_rejects_invalid_delay(self):
         new_cfg, errors = webapp.save_radio_settings(
             {**{key: self.cfg[key] for key in webapp.RADIO_TEXT_FIELDS},
-             "radio_vara_delay": "900", "radio_mercury_delay": "5", "radio_varac_delay": "x"},
+             "radio_vara_delay": "900", "radio_mercury_delay": "5", "radio_varac_delay": "x",
+             "radio_mercury_gui_port": "10080"},
             self.cfg,
         )
         self.assertEqual(len(errors), 2)
@@ -122,6 +146,14 @@ class RadioAppsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("VarAC".encode(), response.data)
         self.assertIn("log line".encode(), response.data)
+
+    def test_radio_page_links_running_mercury_gui(self):
+        cfg = {**self.cfg, "web_password": "", "radio_mercury_gui": True, "radio_mercury_gui_port": 10080}
+        with patch.object(webapp.common, "load_config", return_value=cfg),              patch.object(webapp.radio_apps, "status",
+                          return_value={"state": "active", "sub_state": "running", "since": "dnes", "error": None}),              patch.object(webapp.radio_apps, "recent_log", return_value=""):
+            response = webapp.app.test_client().get("/radio", base_url="http://192.168.1.20:8899")
+        self.assertIn(b"http://192.168.1.20:10080/mercury.html", response.data)
+        self.assertIn(b"waterfall.html", response.data)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ WINESERVER_UNIT = f"{UNIT_PREFIX}wineserver.service"
 AUTOSTART_FILE = os.path.join(os.path.expanduser("~"), ".config", "autostart", "meshcom-radio.desktop")
 MAX_DELAY_SECONDS = 600
 DEFAULT_MODEM_PORT = 8300
+DEFAULT_MERCURY_GUI_PORT = 10080
 
 APPS = {
     "vara": {"label": "VARA", "kind": "wine", "path_key": "radio_vara_path"},
@@ -79,23 +80,37 @@ def systemctl(*arguments: str, check: bool = True) -> subprocess.CompletedProces
     return _run(["systemctl", "--user", *arguments], check=check)
 
 
-def mercury_port(cfg: dict) -> int:
+def _mercury_option(cfg: dict, flag: str, default: int) -> int:
+    """Integer value of a Mercury option such as `-p 8400` or `-p8400`."""
     try:
         arguments = shlex.split(str(cfg.get("radio_mercury_args", "")))
     except ValueError:
-        return DEFAULT_MODEM_PORT
+        return default
     for index, argument in enumerate(arguments):
         value = None
-        if argument == "-p" and index + 1 < len(arguments):
+        if argument == flag and index + 1 < len(arguments):
             value = arguments[index + 1]
-        elif argument.startswith("-p") and len(argument) > 2:
+        elif argument.startswith(flag) and len(argument) > 2:
             value = argument[2:]
         if value is not None:
             try:
                 return int(value)
             except ValueError:
-                return DEFAULT_MODEM_PORT
-    return DEFAULT_MODEM_PORT
+                return default
+    return default
+
+
+def mercury_port(cfg: dict) -> int:
+    return _mercury_option(cfg, "-p", DEFAULT_MODEM_PORT)
+
+
+def mercury_gui_port(cfg: dict) -> int:
+    """WebSocket/HTTP port of the Mercury web GUI (-U overrides the setting)."""
+    try:
+        configured = int(cfg.get("radio_mercury_gui_port", DEFAULT_MERCURY_GUI_PORT))
+    except (TypeError, ValueError):
+        configured = DEFAULT_MERCURY_GUI_PORT
+    return _mercury_option(cfg, "-U", configured)
 
 
 def app_command(app: str, cfg: dict) -> list[str]:
@@ -117,6 +132,15 @@ def app_command(app: str, cfg: dict) -> list[str]:
         arguments = shlex.split(str(cfg.get("radio_mercury_args", "")))
     except ValueError as exc:
         raise RadioError(f"Mercury: neplatné parametry: {exc}") from exc
+    if cfg.get("radio_mercury_gui"):
+        # -G serves the built-in web GUI (spectrum, waterfall, status) and
+        # its WebSocket on the -U port.
+        if "-G" not in arguments:
+            arguments.append("-G")
+        if not any(argument.startswith("-U") for argument in arguments):
+            arguments += ["-U", str(mercury_gui_port(cfg))]
+        if cfg.get("radio_mercury_no_waterfall") and "-W" not in arguments:
+            arguments.append("-W")
     return [command, *arguments]
 
 

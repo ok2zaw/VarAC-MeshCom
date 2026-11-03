@@ -296,6 +296,19 @@ def save_radio_settings(form_data, cfg):
     errors = []
     for key in RADIO_TEXT_FIELDS:
         new_cfg[key] = str(form_data.get(key, cfg.get(key, ""))).strip()
+    new_cfg["radio_mercury_gui"] = form_data.get("radio_mercury_gui") == "on"
+    new_cfg["radio_mercury_no_waterfall"] = form_data.get("radio_mercury_no_waterfall") == "on"
+    try:
+        gui_port = int(form_data.get("radio_mercury_gui_port", ""))
+    except (TypeError, ValueError):
+        gui_port = 0
+    modem_port = radio_apps.mercury_port(new_cfg)
+    if not 1024 <= gui_port <= 65535:
+        errors.append("Mercury: port webového GUI musí být 1024 až 65535.")
+    elif gui_port in {modem_port, modem_port + 1}:
+        errors.append(f"Mercury: port webového GUI koliduje s TCP portem modemu {modem_port}/{modem_port + 1}.")
+    else:
+        new_cfg["radio_mercury_gui_port"] = gui_port
     for app_name, spec in radio_apps.APPS.items():
         new_cfg[f"radio_{app_name}_autostart"] = form_data.get(f"radio_{app_name}_autostart") == "on"
         raw_delay = form_data.get(f"radio_{app_name}_delay", "")
@@ -374,8 +387,12 @@ def radio():
         cfg.get("radio_vara_autostart") and cfg.get("radio_mercury_autostart")
         or all(item["status"]["state"] == "active" for item in apps if item["name"] in {"vara", "mercury"})
     )
+    mercury_gui_url = None
+    if cfg.get("radio_mercury_gui"):
+        mercury_gui_url = f"http://{request.host.split(':')[0]}:{radio_apps.mercury_gui_port(cfg)}/"
     return render_template(
         "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
+        mercury_gui_url=mercury_gui_url,
         port_conflict=port_conflict,
         autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
     )

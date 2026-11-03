@@ -398,6 +398,128 @@ potřeba.
 - v produkci používejte `systemd` a logování do journald
 - pravidelně ověřujte přístup k SMTP/IMAP a stav heartbeat na webu
 
+### 9.1 Napájení Raspberry Pi 5 a start bez tlačítka
+
+Raspberry Pi 5 se při startu ptá zdroje přes USB-C PD, zda dodá 5 A. Pokud
+zdroj 5 A neohlásí (běžné u jiných než oficiálních 27W zdrojů), omezí proud do
+USB na 600 mA a při startu z USB disku bootloader **zastaví a čeká na stisk
+tlačítka** – bez monitoru to vypadá, že Pi „nenaběhlo“.
+
+Zjištění příčiny (přes SSH, po ručním startu):
+
+```bash
+for f in max_current usb_max_current_enable; do
+  printf '%-24s %s\n' "$f" "$(od -An -tu4 --endian=big /proc/device-tree/chosen/power/$f | tr -d ' ')"
+done
+vcgencmd get_throttled
+sudo rpi-eeprom-config
+```
+
+- `max_current` = `3000` (nebo méně) znamená, že zdroj 5 A neohlásil.
+- `throttled=0x0` znamená, že nedošlo k podpětí – zdroj při dané zátěži stačí
+  a kontrolu lze bezpečně obejít. Jiná hodnota (např. `0x50005`) znamená
+  skutečné podpětí; pak je potřeba silnější zdroj (oficiální 27 W, 5,1 V/5 A).
+
+Obejití kontroly – oba kroky udělejte **před** dalším restartem:
+
+1. V `/boot/firmware/config.txt` v sekci `[all]`:
+
+   ```text
+   usb_max_current_enable=1
+   ```
+
+2. V konfiguraci bootloaderu (EEPROM):
+
+   ```bash
+   sudo rpi-eeprom-config > /tmp/boot.conf
+   sed -i '/^PSU_MAX_CURRENT=/d' /tmp/boot.conf
+   echo 'PSU_MAX_CURRENT=5000' >> /tmp/boot.conf
+   cat /tmp/boot.conf
+   sudo rpi-eeprom-config --apply /tmp/boot.conf
+   sudo reboot
+   ```
+
+   Zápis EEPROM proběhne při restartu (může se restartovat dvakrát; během něj
+   neodpojujte napájení). Hláška `SPI device /dev/spidev10.0 not found` je
+   běžná. `--apply` zároveň aktualizuje bootloader na verzi ze systému.
+
+Ověření po restartu:
+
+```bash
+sudo rpi-eeprom-config | grep PSU
+od -An -tu4 --endian=big /proc/device-tree/chosen/power/max_current
+vcgencmd get_throttled
+```
+
+Při vzdálené správě vždy používejte `sudo reboot`. Po `shutdown`/`poweroff`
+zůstává Pi 5 vypnuté, dokud někdo nestiskne tlačítko nebo neodpojí napájení.
+Pod zátěží (VARA HF, SSD, zvuková karta) občas zkontrolujte
+`vcgencmd get_throttled`.
+
+### 9.2 Trvalé ukládání logů
+
+Výchozí journal na Raspberry Pi OS může být jen v RAM a po restartu se ztratí
+(`journalctl -b -1` pak hlásí `no persistent journal was found`). Trvalé
+ukládání zapnete:
+
+```bash
+sudo mkdir -p /var/log/journal
+sudo systemctl restart systemd-journald
+journalctl --list-boots
+```
+
+Logy předchozího běhu pak zobrazí `journalctl -b -1 -n 50`.
+
+### 9.3 Diagnostika příjmu RF stanic
+
+Stránka **RF stanice** ukládá jen rámce přijaté přes LoRa (`src_type` =
+`lora`) typu `pos`, `msg` a `tele`, které neodeslal vlastní uzel. Pokud zůstává
+prázdná:
+
+1. Na stránce **Stav** zkontrolujte kartu *UDP příjem*:
+   - `RF pozorování` – ukládání funguje,
+   - `ignorován jiný typ` – chodí jen pakety z internetu (`udp`) nebo
+     vlastního uzlu (`node`),
+   - `neplatný JSON` – datagram nejde přečíst,
+   - 0 datagramů – uzel nic neposílá; zkontrolujte na uzlu `--extudp on` a
+     `--extudpip <IP-Raspberry-Pi>`.
+2. Podívejte se, co skutečně chodí:
+
+   ```bash
+   sudo tcpdump -A -n -c 20 udp port 1799
+   ```
+
+3. Ověřte obsah databáze:
+
+   ```bash
+   sqlite3 /home/pi/meshcom-gateway/gateway.db \
+     "SELECT COUNT(*), datetime(MAX(observed_at),'unixepoch','localtime') FROM station_observations;"
+   ```
+
+### 9.4 Síťové porty a souběh s dalšími službami
+
+| Port | Služba | Poznámka |
+| --- | --- | --- |
+| 1799/UDP | MeshCom ExtUDP | gateway ⇄ uzel MeshCom |
+| 8899/TCP | web gateway | jen LAN/VPN |
+| 25, 587, 993/TCP | Postfix, Dovecot | kapitola 8, jen LAN/VPN |
+| 8300–8301/TCP | VARA (ARQ, data) | výchozí, kapitola 11 |
+| 8400–8401/TCP | Mercury (ARQ, data) | `-p 8400`, aby nekolidoval s VARA |
+| 10080/TCP | webové GUI Mercury | `-G -U`; bez přihlášení, jen LAN/VPN |
+| 10001, 10002/TCP | LoRa TNC1, TNC2 (KISS) | jen `127.0.0.1` |
+| 8008, 8010/TCP | LinBPQ web, telnet | jen LAN/VPN |
+| 8025, 8110/TCP | BPQMail SMTP, POP3 | kapitola 12.6 |
+
+Obsazené porty zjistíte příkazem `sudo ss -ltnup`. Pokud na Pi běží **Webmin**,
+používá port `10000` – proto má webové GUI Mercury výchozí port `10080`.
+Webmin lze případně přesunout jinam (*Webmin* → *Webmin Configuration* →
+*Ports and Addresses*, nebo):
+
+```bash
+sudo sed -i 's/^port=10000$/port=10010/; s/^listen=10000$/listen=10010/' /etc/webmin/miniserv.conf
+sudo systemctl restart webmin
+```
+
 ## 10. Rozdíl mezi externím a lokálním mailserverem
 
 ### Externí SMTP/IMAP (doporučeno)
@@ -661,6 +783,24 @@ sdílet stejnou zvukovou kartu přes přímé ALSA zařízení `hw:`/`plughw:` �
 použijte dvě rozhraní, nebo PulseAudio/PipeWire (`-x pulse`). Vysílat může
 v jednu chvíli jen jeden modem.
 
+**Webové GUI Mercury:** s přepínačem `-G` Mercury sám servíruje webové
+rozhraní se spektrem, vodopádem, stavem spojení a nastavením rádia a zvuku –
+na Pi není potřeba nic doinstalovat ani mít desktop. Na záložce **VarAC**
+zaškrtněte *Webové GUI Mercury* (výchozí port `10080`), uložte a Mercury
+restartujte; na kartě Mercury se objeví odkazy **Otevřít GUI**
+(`http://<IP-Pi>:10080/mercury.html`) a **Vodopád** (`waterfall.html`).
+Samotný Mercury má výchozí port GUI `10000`; aplikace ho nastavuje na `10080`,
+protože port 10000 používá Webmin (viz kapitola 9.4).
+Vodopád a spektrum zatěžují CPU; volba *Bez vodopádu* (`-W`) je vypne.
+
+> **Bezpečnost:** GUI Mercury nemá přihlášení – kdokoli, kdo se dostane na
+> jeho port, může modem ovládat včetně vysílání. Port 10080 zpřístupněte jen
+> v LAN/VPN, nikdy ho nepřesměrovávejte z internetu.
+
+Grafická aplikace `mercury-ui` (Fyne) obsahuje vlastní kopii modemu, proto ji
+nespouštějte současně s Mercury ze záložky VarAC. Pro vzdálený provoz na Pi je
+webové GUI vhodnější.
+
 ### 11.10 Ovládání z webu – záložka VarAC
 
 Záložka **VarAC** ve webovém rozhraní gateway spouští, zastavuje a restartuje
@@ -723,6 +863,7 @@ journalctl --user -u meshcom-radio-varac -n 50
 | Program na záložce VarAC hned skončí (Chyba) | rozbalte jeho výpis na záložce, nebo `journalctl --user -u meshcom-radio-<program>` |
 | Okno VARA/VarAC se neobjeví | zkontrolujte přihlášený desktop a hodnotu Displej (`echo $DISPLAY` v terminálu desktopu) |
 | VarAC se nepřipojí k Mercury | port ve VarAC musí odpovídat `-p` v parametrech Mercury |
+| GUI Mercury se nenačte | Mercury musí běžet se zapnutým webovým GUI (po změně restart); `ss -ltn \| grep 10080`; port nesmí používat jiná služba (Webmin) |
 | Vysoká teplota, nízký výkon | `vcgencmd measure_temp`, `vcgencmd get_throttled`; použijte aktivní chladič |
 
 Zátěž lze sledovat příkazem `htop`. Trvale přes 90 % CPU při příjmu znamená,

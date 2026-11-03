@@ -20,6 +20,12 @@
       {% elif item.status.since %}od {{ item.status.since }}
       {% else %}autostart {{ 'zapnutý, za ' ~ item.delay ~ ' s' if item.autostart else 'vypnutý' }}{% endif %}
     </div>
+    {% if item.name == 'mercury' and mercury_gui_url %}
+    <div class="card-sub">
+      {% if state == 'active' %}<a class="clear-filter" href="{{ mercury_gui_url }}mercury.html" target="_blank" rel="noopener">Otevřít GUI</a>{% if not cfg.radio_mercury_no_waterfall %} · <a class="clear-filter" href="{{ mercury_gui_url }}waterfall.html" target="_blank" rel="noopener">Vodopád</a>{% endif %}
+      {% else %}GUI bude na {{ mercury_gui_url }}mercury.html{% endif %}
+    </div>
+    {% endif %}
     <div class="radio-actions">
       {% for action, text in [("start", "Spustit"), ("restart", "Restart"), ("stop", "Zastavit")] %}
       <form method="post" action="{{ url_for('radio') }}">
@@ -72,6 +78,18 @@
     <label>Mercury – parametry <span class="hint">(zvuk, PTT, port; aktuální port {{ mercury_port }})</span>
       <input type="text" name="radio_mercury_args" value="{{ cfg.radio_mercury_args }}" placeholder="-x alsa -i plughw:1,0 -o plughw:1,0 -p 8400">
     </label>
+    <label class="checkbox">
+      <input type="checkbox" name="radio_mercury_gui" {{ 'checked' if cfg.radio_mercury_gui }}>
+      Webové GUI Mercury (spektrum, vodopád, stav; přepínač -G)
+    </label>
+    <label>Port webového GUI Mercury
+      <input type="number" name="radio_mercury_gui_port" value="{{ cfg.radio_mercury_gui_port }}" min="1024" max="65535">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="radio_mercury_no_waterfall" {{ 'checked' if cfg.radio_mercury_no_waterfall }}>
+      Bez vodopádu a spektra (šetří CPU; přepínač -W)
+    </label>
+    <p class="hint">Webové GUI Mercury nemá přihlášení – kdokoli v síti, kdo otevře jeho port, může modem ovládat. Port zpřístupněte jen v LAN/VPN. Změna se projeví po restartu Mercury.</p>
   </fieldset>
 
   <button type="submit">Uložit</button>

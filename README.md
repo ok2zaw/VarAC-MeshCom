@@ -30,13 +30,28 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
 - Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
-	VarAC, včetně automatického startu po přihlášení do desktopu se zpožděním
+	VarAC, s odkazem na webové GUI Mercury (spektrum, vodopád), včetně automatického startu po přihlášení do desktopu se zpožděním
 	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
 - Spouštět, nastavovat a sledovat dva LoRa KISS TNC (TNC1, TNC2; upravená
 	kopie IZ7BOJ ve složce `lora_tnc/`) a LinBPQ (uzel a BBS) ze záložky BPQ,
 	včetně startu po zapnutí Pi se zpožděním; BBS lze napojit na místní
 	Postfix jako e-mailovou bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
 - Ukládat historii, chyby a heartbeat do SQLite.
+
+## Dokumentace
+
+[INSTALL.md](INSTALL.md) popisuje instalaci na Raspberry Pi/Debian a provoz:
+
+- kapitoly 2–7: gateway, konfigurace a systemd služby,
+- kapitola 8: volitelný lokální poštovní uzel (Postfix, Dovecot, getmail6),
+- kapitola 9: tipy pro provoz – napájení Raspberry Pi 5 a start bez tlačítka
+	(`PSU_MAX_CURRENT`), trvalé logy, diagnostika RF stanic a přehled síťových
+	portů včetně souběhu s Webminem,
+- kapitola 11: VARA, Mercury (včetně webového GUI) a VarAC na Raspberry Pi 5,
+- kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix.
+
+Upravená kopie LoRa TNC je ve složce [`lora_tnc/`](lora_tnc/README.md) i se
+seznamem změn oproti originálu.
 
 ## Konfigurace
 
