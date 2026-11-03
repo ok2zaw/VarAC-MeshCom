@@ -13,6 +13,7 @@ AUTOSTART_FILE) to start the programs enabled for autostart, each after its
 configured delay.
 """
 
+import getpass
 import os
 import shlex
 import shutil
@@ -71,7 +72,7 @@ def _run(arguments: list[str], check: bool = True, timeout: int = 20) -> subproc
         detail = result.stderr.strip() or result.stdout.strip()
         if "Failed to connect to bus" in detail or "No medium found" in detail:
             detail = ("Uživatelský systemd neběží. Přihlaste se do desktopu nebo "
-                      "spusťte `sudo loginctl enable-linger pi`.")
+                      f"spusťte `sudo loginctl enable-linger {getpass.getuser()}`.")
         raise RadioError(detail or f"{arguments[0]} skončil s kódem {result.returncode}.")
     return result
 
@@ -149,6 +150,7 @@ def _environment(cfg: dict) -> list[str]:
     values = {
         "WINEPREFIX": str(cfg.get("radio_wine_prefix", "")).strip() or os.path.join(home, ".wine"),
         "WINEDEBUG": "-all",
+        "BOX86_DYNAREC_BIGBLOCK": "0",
         "BOX64_DYNAREC_STRONGMEM": "1",
         "MESA_GL_VERSION_OVERRIDE": "3.2",
     }

@@ -47,7 +47,7 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - kapitola 9: tipy pro provoz – napájení Raspberry Pi 5 a start bez tlačítka
 	(`PSU_MAX_CURRENT`), trvalé logy, diagnostika RF stanic a přehled síťových
 	portů včetně souběhu s Webminem,
-- kapitola 11: VARA, Mercury (včetně webového GUI) a VarAC na Raspberry Pi 5,
+- kapitola 11: VARA, Mercury (včetně webového GUI) a VarAC na Raspberry Pi,
 - kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix.
 
 Upravená kopie LoRa TNC je ve složce [`lora_tnc/`](lora_tnc/README.md) i se
@@ -117,4 +117,3 @@ Postfix a Dovecot se aktualizují samostatně podle [INSTALL.md](INSTALL.md).
 - `common.py` – konfigurace, SQLite, Maildir a heartbeat
 - `templates/`, `static/` – šablony a styly webu
 - `systemd/` – produkční jednotky pro gateway a web
-

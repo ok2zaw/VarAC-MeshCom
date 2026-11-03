@@ -40,7 +40,8 @@ class RadioAppsTests(unittest.TestCase):
         self.assertIn(f"--unit={radio_apps.WINESERVER_UNIT}", launches[0])
         self.assertEqual(launches[0][-3:], ["wineserver", "--foreground", "--persistent"])
         self.assertIn("--unit=meshcom-radio-vara.service", launches[1])
-        self.assertIn("--setenv=WINEPREFIX=/home/pi/.wine", launches[1])
+        self.assertIn(f"--setenv=WINEPREFIX={common.WINE_PREFIX}", launches[1])
+        self.assertIn("--setenv=BOX86_DYNAREC_BIGBLOCK=0", launches[1])
         self.assertEqual(launches[1][-2:], ["wine", self.exe])
 
     def test_running_app_is_not_started_twice(self):

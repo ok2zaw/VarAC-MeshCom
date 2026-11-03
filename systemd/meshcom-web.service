@@ -5,11 +5,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/meshcom-gateway
-EnvironmentFile=-/home/pi/meshcom-gateway/.env
-ExecStart=/home/pi/meshcom-gateway/.venv/bin/waitress-serve --threads=4 --listen=0.0.0.0:8899 webapp:app
+User=ok2zaw
+Group=ok2zaw
+WorkingDirectory=/home/ok2zaw/meshcom-gateway
+EnvironmentFile=-/home/ok2zaw/meshcom-gateway/.env
+ExecStart=/home/ok2zaw/meshcom-gateway/.venv/bin/waitress-serve --threads=4 --listen=0.0.0.0:8899 webapp:app
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15

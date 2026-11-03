@@ -1,8 +1,8 @@
 # Instalace a provoz MeshCom Gateway na Raspberry Pi / Debian
 
-> **Uživatelský účet:** Návod i `setup_rpi.sh` předpokládají účet `pi`. Pokud
-> používáte jiný účet, po instalaci a před spuštěním služeb nahraďte `pi` jeho
-> skutečným jménem v cestách `/home/pi`, ve vlastnictví `pi:pi`, v cestách Maildir
+> **Uživatelský účet:** Návod i `setup_rpi.sh` předpokládají účet `ok2zaw`. Pokud
+> používáte jiný účet, po instalaci a před spuštěním služeb nahraďte `ok2zaw` jeho
+> skutečným jménem v cestách `/home/ok2zaw`, ve vlastnictví `ok2zaw:ok2zaw`, v cestách Maildir
 > a v obou souborech `systemd/*.service`. V jednotkách upravte hlavně `User`,
 > `Group`, `WorkingDirectory`, `EnvironmentFile` a `ExecStart`. Poté spusťte
 > `sudo systemctl daemon-reload` a služby restartujte.
@@ -35,19 +35,19 @@ sudo apt install -y git python3 python3-venv python3-pip mailutils
 Pokud budete používat lokální Maildir frontu, vytvořte ji:
 
 ```bash
-mkdir -p /home/pi/Maildir/{new,cur,tmp}
-chown -R pi:pi /home/pi/Maildir
+mkdir -p /home/ok2zaw/Maildir/{new,cur,tmp}
+chown -R ok2zaw:ok2zaw /home/ok2zaw/Maildir
 ```
 
 ## 3. Stažení projektu
 
 ```bash
-cd /home/pi
+cd /home/ok2zaw
 git clone https://github.com/ok2zaw/VarAC-MeshCom.git meshcom-gateway
-cd /home/pi/meshcom-gateway
+cd /home/ok2zaw/meshcom-gateway
 ```
 
-Projekt instalujte pod uživatelem `pi`, protože obě systemd služby pod tímto
+Projekt instalujte pod uživatelem `ok2zaw`, protože obě systemd služby pod tímto
 uživatelem zapisují konfiguraci, SQLite databázi a Maildir. Pokud používáte
 jméno jiného účtu, upravte `User`, `Group` a cesty v obou souborech v `systemd/`.
 
@@ -59,7 +59,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Spusťte tyto příkazy jako uživatel `pi`, bez `sudo`. `sudo` patří k instalaci
+Spusťte tyto příkazy jako uživatel `ok2zaw`, bez `sudo`. `sudo` patří k instalaci
 systémových balíčků (`apt`) a ke správě služeb, ne k instalaci balíčků do `.venv`.
 Skript `setup_rpi.sh` spuštěný jako root skončí s vysvětlením, aby nevytvořil
 virtuální prostředí vlastněné rootem.
@@ -68,13 +68,13 @@ Pokud už instalace skončila chybou `Permission denied` uvnitř `.venv`, opravt
 vlastníka prostředí jednorázově:
 
 ```bash
-sudo chown -R pi:pi /home/pi/meshcom-gateway/.venv
+sudo chown -R ok2zaw:ok2zaw /home/ok2zaw/meshcom-gateway/.venv
 ```
 
-Potom jako `pi` znovu aktivujte prostředí a nainstalujte závislosti:
+Potom jako `ok2zaw` znovu aktivujte prostředí a nainstalujte závislosti:
 
 ```bash
-cd /home/pi/meshcom-gateway
+cd /home/ok2zaw/meshcom-gateway
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
@@ -82,7 +82,7 @@ Pokud se při spuštění objeví `ModuleNotFoundError: No module named 'flask'`
 znovu nainstalujte závislosti do projektového prostředí a ověřte import:
 
 ```bash
-cd /home/pi/meshcom-gateway
+cd /home/ok2zaw/meshcom-gateway
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -c "import flask; print(flask.__version__)"
 ```
@@ -106,8 +106,8 @@ Upravte soubor `config.json`:
   "smtp_use_tls": true,
   "mail_from": "meshcom-gateway@example.com",
   "mail_to": "you@example.com",
-  "maildir_new": "/home/pi/Maildir/new",
-  "maildir_cur": "/home/pi/Maildir/cur",
+  "maildir_new": "/home/ok2zaw/Maildir/new",
+  "maildir_cur": "/home/ok2zaw/Maildir/cur",
   "imap_host": "imap.example.com",
   "imap_port": 993,
   "imap_user": "gateway@example.com",
@@ -145,7 +145,7 @@ Web běží na portu 8899. Přístup je chráněn podle nastavení `web_username
 
 ## 7. Systémová služba (systemd)
 
-Soubory v `systemd/` předpokládají projekt v `/home/pi/meshcom-gateway` a
+Soubory v `systemd/` předpokládají projekt v `/home/ok2zaw/meshcom-gateway` a
 virtuální prostředí vytvořené v předchozím kroku. Gateway běží jako samostatná
 služba; web používá produkční WSGI server Waitress, nikoli vývojový server Flask.
 Obě jednotky načítají volitelný `.env` soubor. Nainstalujte a aktivujte je:
@@ -176,7 +176,7 @@ zajišťuje systemd path unit. Web pouze vytvoří prázdný marker a rootem bě
 oneshot služba podle něj restartuje pevně dané dvě služby. Neudělujte webovému
 uživateli obecné `sudo`.
 
-Pokud projekt není v `/home/pi/meshcom-gateway`, nejprve upravte konstantu
+Pokud projekt není v `/home/ok2zaw/meshcom-gateway`, nejprve upravte konstantu
 `REQUEST_FILE` v `scripts/meshcom-restart` a `PathExists` v
 `systemd/meshcom-restart.path` na skutečnou cestu k souboru
 `.meshcom-restart-request` v repozitáři. Pak nainstalujte helper a jednotky:
@@ -228,7 +228,7 @@ Nainstalujte služby:
 sudo apt install -y postfix dovecot-core dovecot-imapd getmail6 libsasl2-modules
 ```
 
-V následujících příkazech nahraďte `/home/pi` cestou skutečného účtu a dosaďte
+V následujících příkazech nahraďte `/home/ok2zaw` cestou skutečného účtu a dosaďte
 hostname SMTP/IMAP serveru vlastní domény. V příkladu se používá SMTP submission
 na portu 587 se STARTTLS a přihlášením.
 
@@ -273,7 +273,7 @@ Vytvořte Maildir pod účtem, pod kterým poběží lokální schránka a getma
 výchozí účet z návodu:
 
 ```bash
-MAILUSER=pi
+MAILUSER=ok2zaw
 sudo install -d -o "$MAILUSER" -g "$MAILUSER" -m 700 "/home/$MAILUSER/Maildir/cur" \
   "/home/$MAILUSER/Maildir/new" "/home/$MAILUSER/Maildir/tmp"
 ```
@@ -314,7 +314,7 @@ use_peek = True
 
 [destination]
 type = Maildir
-path = /home/pi/Maildir/
+path = /home/ok2zaw/Maildir/
 
 [options]
 read_all = false
@@ -338,7 +338,7 @@ sudo crontab -u "$MAILUSER" -e
 Přidejte řádek, který spustí getmail každých pět minut:
 
 ```cron
-*/5 * * * * /usr/bin/getmail --getmaildir /home/pi/.getmail --rcfile getmailrc
+*/5 * * * * /usr/bin/getmail --getmaildir /home/ok2zaw/.getmail --rcfile getmailrc
 ```
 
 ### Nastavení MeshCom gateway ve webovém prostředí
@@ -360,8 +360,8 @@ složku nastavte `MeshCom`. Cesty `maildir_new` a `maildir_cur` ponechte ve
 vyhrazeném Maildiru gateway, například:
 
 ```text
-/home/pi/meshcom-gateway/Maildir/new
-/home/pi/meshcom-gateway/Maildir/cur
+/home/ok2zaw/meshcom-gateway/Maildir/new
+/home/ok2zaw/meshcom-gateway/Maildir/cur
 ```
 
 Veřejný účet tak používají odděleně: getmail6 čte `INBOX` pro lokální schránku a
@@ -492,7 +492,7 @@ prázdná:
 3. Ověřte obsah databáze:
 
    ```bash
-   sqlite3 /home/pi/meshcom-gateway/gateway.db \
+   sqlite3 /home/ok2zaw/meshcom-gateway/gateway.db \
      "SELECT COUNT(*), datetime(MAX(observed_at),'unixepoch','localtime') FROM station_observations;"
    ```
 
@@ -546,159 +546,114 @@ Nevýhody:
 Tato varianta není veřejný mailserver: veřejnou adresu a příjem z internetu
 nadále zajišťuje vlastní server. Raspberry používá jeho SMTP/IMAP rozhraní.
 
-## 11. VARA, Mercury a VarAC na Raspberry Pi 5 (experimentální)
+## 11. VARA, Mercury a VarAC na Raspberry Pi (experimentální)
 
-VARA (EA5HVK) i VarAC jsou programy pro Windows na platformě x86. Raspberry Pi 5
-má procesor ARM64, proto se spouštějí přes **Wine** (vrstva Windows API) a
-**Box64** (překlad instrukcí x86/x64 na ARM64). Provoz je funkční, ale
-experimentální: počítejte s vyšší zátěží CPU, občasnými pády GUI a nutností
-ladění zvuku a PTT. Gateway samotná (kapitoly 2–7) na Wine nezávisí.
+VARA (EA5HVK) i VarAC jsou programy pro Windows. Na Raspberry Pi se spouštějí
+přes **Wine** a emulaci x86; tento postup používá instalátor Winelink s Box86.
+Raspberry Pi 4 je doporučené, na Pi 3 počítejte s pomalým během. Na Pi 5 je
+nutné přepnout jádro na 4KB stránky. Provoz je experimentální: počítejte s
+vyšší zátěží CPU, občasnými pády GUI a nutností ladění zvuku a PTT. Mercury
+běží samostatně nativně na ARM64 Linuxu. Gateway samotná (kapitoly 2–7) na
+Wine nezávisí.
 
-### 11.1 Požadavky
+### 11.1 Instalace VARA a VarAC od nuly
 
-- Raspberry Pi 5, doporučeno **8 GB RAM**, aktivní chladič (VARA HF trvale
-  zatěžuje CPU, bez chlazení dochází k podtaktování)
-- kvalitní SSD/NVMe nebo rychlá microSD karta (A2), napájecí zdroj 27 W
-- **64bitový Raspberry Pi OS s desktopem** (Bookworm nebo novější); VARA i VarAC
-  mají grafické rozhraní, varianta Lite bez desktopu nestačí
-- USB zvuková karta / rozhraní k rádiu (SignaLink, Digirig, vestavěná karta
-  transceiveru apod.) a případně USB‑serial pro CAT/PTT
-- přístup k desktopu – monitor, nebo vzdáleně přes VNC (`sudo raspi-config` →
-  *Interface Options* → *VNC*)
-- registrační klíč VARA (volitelně; bez něj běží VARA v omezené rychlosti)
+#### 0. Příprava systému
 
-### 11.2 Přepnutí jádra na 4K stránky paměti
+- Raspberry Pi 4 (Pi 3 funguje, ale pomalu) s Raspberry Pi OS, ideálně 64bit.
+- **Pi 5:** do `/boot/firmware/config.txt` přidejte `kernel=kernel8.img` a
+  restartujte. Ověřte `getconf PAGESIZE`; výsledek musí být `4096`.
+- Pracujte z grafické plochy nebo přes VNC, ne z čistého SSH. Příkazy spouštějte
+  jako běžný uživatel, ne jako root.
+- VARA a VarAC potřebují desktopové prostředí a zvukové rozhraní k rádiu.
 
-Výchozí jádro Pi 5 používá stránky o velikosti 16 KB, se kterými Wine a Box64
-nefungují. Raspberry Pi OS obsahuje i jádro se 4 KB stránkami, stačí ho zapnout:
+#### 1. Úklid po neúspěšném pokusu s dotnet48
 
-```bash
-sudo nano /boot/firmware/config.txt
-```
-
-Na konec souboru (do sekce `[all]`) přidejte:
-
-```text
-kernel=kernel8.img
-```
-
-Restartujte a ověřte velikost stránky – výsledek musí být `4096`:
+Proveďte pouze v případě, že instalace `dotnet48` už dříve selhala. Pokud
+`~/.wine-old` existuje, nejdřív zvolte jiný název zálohy.
 
 ```bash
-sudo reboot
-getconf PAGESIZE
+wineserver -k
+mv ~/.wine ~/.wine-old
+rm -rf ~/.cache/winetricks/dotnet48
 ```
 
-### 11.3 Aktualizace systému a doporučené nastavení desktopu
+#### 2. Winelink (Box86, Wine, wine-mono a VARA)
 
 ```bash
-sudo apt update
-sudo apt full-upgrade -y
-sudo apt install -y git wget curl cabextract unzip p7zip-full alsa-utils
+curl -O https://raw.githubusercontent.com/WheezyE/Winelink/main/install_winelink.sh
+bash install_winelink.sh vara_only
 ```
 
-Wine běží nejspolehlivěji pod X11. Pokud se okna VARA/VarAC chovají divně
-(nepřekreslují se, nedají se přesunout), přepněte desktop z Waylandu na X11:
-`sudo raspi-config` → *Advanced Options* → *Wayland* → *X11* a restartujte.
+Na konci instalace skript provede nastavení zvukové karty pro VARA.
 
-### 11.4 Instalace Box64 a Wine přes Pi-Apps
-
-Nejjednodušší a udržovaná cesta je balík **Wine (x64)** z Pi-Apps, který
-nainstaluje Box64 i Wine v režimu WoW64 (umí spouštět 64bitové i 32bitové
-Windows programy – VARA je 32bitová). Spusťte jako uživatel `pi`, bez `sudo`:
+#### 3. Fonty pro VarAC
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/Botspot/pi-apps/master/install | bash
-~/pi-apps/manage install "Wine (x64)"
+sudo apt install ttf-mscorefonts-installer
 ```
 
-Instalace na Pi 5 trvá přibližně 5–15 minut. Alternativně lze totéž provést v
-grafickém Pi-Apps: *Tools* → *Emulation* → *Wine (x64)* → *Install*.
+Nainstalujte také font **Segoe UI Emoji** podle návodu
+[segoe-ui-linux](https://github.com/SpudGunMan/segoe-ui-linux).
 
-Ověřte funkčnost:
+#### 4. VarAC
+
+Stáhněte ZIP z <https://www.varac-hamradio.com/download> do `~/Downloads` a
+rozbalte jej:
 
 ```bash
-box64 --version
-wine --version
+mkdir -p ~/.wine/drive_c/VarAC
+unzip ~/Downloads/VarAC_*.zip -d ~/.wine/drive_c/VarAC
 ```
 
-Do `~/.bashrc` přidejte proměnné, které na Pi 4/5 předcházejí zamrzání:
+#### 5. První spuštění a Linux mód
+
+Spusťte VarAC:
 
 ```bash
-cat >> ~/.bashrc <<'EOF'
-export BOX64_DYNAREC_STRONGMEM=1
-export MESA_GL_VERSION_OVERRIDE=3.2
+env BOX86_DYNAREC_BIGBLOCK=0 WINEDEBUG=-all wine ~/.wine/drive_c/VarAC/VarAC.exe
+```
+
+Vyplňte volací znak a lokátor a aplikaci zavřete. Potom zapněte kompatibilní
+režim pro Linux:
+
+```bash
+sed -i 's/LinuxCompatibleMode=OFF/LinuxCompatibleMode=ON/' ~/.wine/drive_c/VarAC/VarAC.ini
+```
+
+Nastavení lze změnit také v GUI: *Settings* → *Rig control & Vara
+configuration* → *Linux compatible mode*. Pokud `VarAC.ini` v této složce
+nevznikne, hledejte jej v `~/VarAC.ini`. Někdy je potřeba aplikaci několikrát
+restartovat, než nastavení uloží.
+
+#### 6. Červené křížky v GUI
+
+Pokud GUI zobrazuje červené křížky místo ikon, spusťte:
+
+```bash
+BOX86_DYNAREC=0 winetricks -q gdiplus corefonts
+```
+
+#### 7. Zástupce v menu
+
+```bash
+cat << EOF | sudo tee /usr/share/applications/VarAC.desktop
+[Desktop Entry]
+Name=VarAC Chat
+Exec=env BOX86_DYNAREC_BIGBLOCK=0 WINEDEBUG=-all wine $HOME/.wine/drive_c/VarAC/VarAC.exe
+Type=Application
+Categories=HamRadio;
 EOF
-source ~/.bashrc
 ```
 
-### 11.5 Příprava Wine prostředí (prefixu)
-
-Vytvořte výchozí prefix `~/.wine` a nainstalujte aktuální winetricks:
-
-```bash
-wineboot -u
-mkdir -p ~/.local/bin
-wget -O ~/.local/bin/winetricks \
-  https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
-chmod +x ~/.local/bin/winetricks
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Nainstalujte knihovny, které VARA a VarAC potřebují (VARA je psaná ve Visual
-Basic 6, VarAC v .NET Frameworku). Instalace .NET pod emulací trvá dlouho
-(desítky minut), nepřerušujte ji ani při dlouhé nečinnosti:
-
-```bash
-winetricks -q vb6run pdh_nt4 corefonts
-winetricks -q dotnet48
-```
-
-Nastavte verzi Windows na Windows 10:
-
-```bash
-winecfg -v win10
-```
-
-V `winecfg` na kartě *Audio* zkontrolujte, že je vybrán ovladač ALSA nebo
-PulseAudio/PipeWire a že je vidět USB zvuková karta.
-
-### 11.6 Instalace VARA (HF a/nebo FM)
-
-1. Stáhněte instalační ZIP VARA HF (případně VARA FM) ze stránky autora
-   <https://rosmodem.wordpress.com/> do `~/Downloads`.
-2. Rozbalte a spusťte instalátor:
-
-   ```bash
-   cd ~/Downloads
-   unzip -o "VARA HF*.zip" -d vara-hf
-   wine vara-hf/*setup*.exe
-   ```
-
-3. Instalaci proveďte s výchozí cestou (`C:\VARA`, resp. `C:\VARA FM`).
-4. První spuštění:
-
-   ```bash
-   wine "$HOME/.wine/drive_c/VARA/VARA.exe"
-   ```
-
-5. Ve VARA nastavte v *Settings* → *SoundCard* vstup a výstup USB zvukové
-   karty. Pokud ji nevidíte, ukončete Wine (`wineserver -k`), zkontrolujte kartu
-   příkazem `arecord -l` a znovu otevřete `winecfg`.
-6. V *Settings* → *VARA Setup* zadejte volací znak a případně registrační klíč.
-7. **Vypněte vodopád** (Waterfall / Spectrum) – vykreslování pod emulací
-   zbytečně zatěžuje CPU a je známou příčinou pádů.
-8. TCP porty nechte výchozí (VARA HF `8300`/`8301`); stejné porty pak zadáte ve
-   VarAC.
-
-### 11.7 Sériový port pro CAT/PTT
+### 11.2 Volitelné nastavení sériového CAT/PTT
 
 Wine mapuje linuxová sériová zařízení na COM porty v adresáři `dosdevices`.
 Přidejte uživatele do skupiny `dialout` a vytvořte odkaz (příklad pro
 `/dev/ttyUSB0` jako `COM5`):
 
 ```bash
-sudo usermod -aG dialout pi
+sudo usermod -aG dialout ok2zaw
 ls -l /dev/serial/by-id/
 ln -sf /dev/serial/by-id/<ID-vaseho-zarizeni> ~/.wine/dosdevices/com5
 ```
@@ -707,32 +662,31 @@ Odkaz na `/dev/serial/by-id/...` je stabilní i po přepojení USB, na rozdíl o
 `/dev/ttyUSB0`. Po přidání do skupiny `dialout` se odhlaste a znovu přihlaste.
 Pro rádia s VOX nebo Digirig s PTT přes zvukovou kartu tento krok není nutný.
 
-### 11.8 Instalace VarAC
+### 11.3 Když instalace nefunguje
 
-1. Stáhněte aktuální instalační balík VarAC z <https://www.varac-hamradio.com/>
-   do `~/Downloads`.
-2. Rozbalte a spusťte instalátor:
+- **Winelink skončí chybou** (často na systému novějším než Bullseye nebo na
+  Pi 5): nainstalujte Pi-Apps příkazem
+  `wget -qO- https://raw.githubusercontent.com/Botspot/pi-apps/master/install | bash`.
+  V Pi-Apps zvolte *Tools* → *Emulation* → *Box86*; instalace Box86 nainstaluje
+  i Wine. Potom ve staženém instalačním adresáři VARA spusťte:
 
-   ```bash
-   cd ~/Downloads
-   unzip -o "VarAC*.zip" -d varac
-   wine varac/*.exe
-   ```
+  ```bash
+  cd ~/Downloads
+  winetricks -q comdlg32ocx pdh_nt4 vb6run
+  wine "VARA setup (Run as Administrator).exe"
+  cp ~/.wine/drive_c/VARA/OCX/* ~/.wine/drive_c/VARA/
+  ```
 
-3. Po instalaci spusťte VarAC (cestu upravte podle skutečného umístění):
+  Po instalaci VARA pokračujte krokem 3 výše. Pokud se název instalačního EXE
+  liší, použijte skutečný název staženého souboru.
+- **VarAC se vůbec neotevře:** příčinou bývá příliš stará verze Wine (Winelink
+  používá Wine 7.1); cesta přes Pi-Apps instaluje novější verzi.
+- **Systém zamrzne:** z jiného počítače se připojte přes SSH a spusťte
+  `wineserver -k`.
+- **Červené křížky v GUI:** použijte příkaz z kroku 6.
+- **Nedoinstalovávejte `dotnet48`:** VarAC funguje s wine-mono.
 
-   ```bash
-   ls "$HOME/.wine/drive_c/"
-   wine "$HOME/.wine/drive_c/VarAC/VarAC.exe"
-   ```
-
-4. V nastavení VarAC zadejte volací znak a lokátor, cestu k `VARA.exe`
-   (`C:\VARA\VARA.exe`), TCP porty VARA (`8300`/`8301`) a způsob ovládání
-   PTT/CAT (COM port z kroku 11.7, případně VOX).
-5. Nejprve ověřte příjem (dekódování beaconů na volací frekvenci VarAC) a
-   teprve potom vysílání.
-
-### 11.9 Instalace modemu Mercury (volitelně)
+### 11.4 Instalace modemu Mercury (volitelně)
 
 [Mercury](https://github.com/Rhizomatica/mercury) je open-source HF modem
 projektu HERMES (Rhizomatica). Běží nativně na ARM64 Linuxu bez Wine a bez
@@ -801,7 +755,7 @@ Grafická aplikace `mercury-ui` (Fyne) obsahuje vlastní kopii modemu, proto ji
 nespouštějte současně s Mercury ze záložky VarAC. Pro vzdálený provoz na Pi je
 webové GUI vhodnější.
 
-### 11.10 Ovládání z webu – záložka VarAC
+### 11.5 Ovládání z webu – záložka VarAC
 
 Záložka **VarAC** ve webovém rozhraní gateway spouští, zastavuje a restartuje
 VARA, Mercury a VarAC, zobrazuje jejich stav a poslední výpis a nastavuje
@@ -821,7 +775,7 @@ Jednorázová příprava:
    programy kdykoli:
 
    ```bash
-   sudo loginctl enable-linger pi
+   sudo loginctl enable-linger ok2zaw
    ```
 
 3. Pokud jste dříve vytvořili ruční spouštěcí skript `~/start-varac.sh` a
@@ -845,21 +799,26 @@ systemctl --user list-units 'meshcom-radio-*'
 journalctl --user -u meshcom-radio-varac -n 50
 ```
 
-> **Bezpečnost:** Záložka spouští programy pod účtem `pi`. Web proto
+> **Bezpečnost:** Záložka spouští programy pod účtem `ok2zaw`. Web proto
 > zpřístupněte jen v důvěryhodné síti se silným heslem. Spustit lze pouze
 > soubory `.exe` přes Wine a program `mercury`.
 
-### 11.11 Řešení problémů
+### 11.6 Řešení problémů
+
+Zdroje:
+
+- [Winelink (WheezyE/KI7POL)](https://github.com/WheezyE/Winelink/)
+- [Installing VarAC on Linux/raspberry64/Mac using WINE](https://www.varac-hamradio.com/post/installing-varac-on-linux-raspberry64-using-wine)
 
 
 | Problém | Řešení |
 | --- | --- |
-| Wine nespustí nic, chyby paměti / `mmap` | `getconf PAGESIZE` musí vracet `4096` – viz krok 11.2 |
-| Systém zamrzne, okna nereagují | `wineserver -k`; zkontrolujte `BOX64_DYNAREC_STRONGMEM=1`, vypněte vodopád ve VARA |
-| VARA nevidí zvukovou kartu | `arecord -l`, `aplay -l`; ve `winecfg` → *Audio* zvolte jiný ovladač; restartujte Wine |
-| VarAC hlásí chybějící .NET | znovu `winetricks -q dotnet48`, případně v čistém prefixu (`mv ~/.wine ~/.wine.bak`) |
-| PTT nefunguje | ověřte skupinu `dialout`, odkaz v `~/.wine/dosdevices/` a číslo COM portu ve VarAC |
-| Web hlásí „Uživatelský systemd neběží“ | `sudo loginctl enable-linger pi`, případně přihlášení do desktopu |
+| Wine nespustí nic, chyby paměti / `mmap` | Na Pi 5 ověřte `getconf PAGESIZE` = `4096` (krok 0); případně použijte cestu přes Pi-Apps |
+| Systém zamrzne, okna nereagují | Z jiného počítače spusťte `wineserver -k`; vypněte vodopád ve VARA |
+| VARA nevidí zvukovou kartu | Znovu spusťte nastavení zvuku Winelink; zkontrolujte `arecord -l` a `aplay -l` |
+| VarAC hlásí chybějící .NET | Neinstalujte `dotnet48`; ověřte instalaci wine-mono nebo použijte čistý prefix |
+| PTT nefunguje | Ověřte skupinu `dialout`, odkaz v `~/.wine/dosdevices/` a číslo COM portu ve VarAC |
+| Web hlásí „Uživatelský systemd neběží“ | `sudo loginctl enable-linger ok2zaw`, případně přihlášení do desktopu |
 | Program na záložce VarAC hned skončí (Chyba) | rozbalte jeho výpis na záložce, nebo `journalctl --user -u meshcom-radio-<program>` |
 | Okno VARA/VarAC se neobjeví | zkontrolujte přihlášený desktop a hodnotu Displej (`echo $DISPLAY` v terminálu desktopu) |
 | VarAC se nepřipojí k Mercury | port ve VarAC musí odpovídat `-p` v parametrech Mercury |
@@ -907,7 +866,7 @@ LoRa modul 2 ⇄ TNC2 (KISS TCP 127.0.0.1:10002) ⇄ ┴ LinBPQ + BBS
 ```bash
 sudo raspi-config nonint do_spi 0
 sudo apt install -y python3 python3-spidev python3-rpi-lgpio
-sudo usermod -aG spi,gpio pi
+sudo usermod -aG spi,gpio ok2zaw
 sudo reboot
 ```
 
@@ -965,15 +924,15 @@ Důležité:
 ### 12.3 Instalace LinBPQ
 
 Použijte oficiální instalační skript autora (G8BPQ), který stáhne verzi pro
-Raspberry Pi do `/home/pi/linbpq`. Spusťte jako `pi`:
+Raspberry Pi do `/home/ok2zaw/linbpq`. Spusťte jako `ok2zaw`:
 
 ```bash
-cd /home/pi
+cd /home/ok2zaw
 wget https://www.cantab.net/users/john.wiseman/Downloads/installLinBPQ
 less installLinBPQ        # projděte, co skript dělá
 chmod +x installLinBPQ
 ./installLinBPQ
-ls -l /home/pi/linbpq/
+ls -l /home/ok2zaw/linbpq/
 ```
 
 Pokud chybí knihovna `libconfig`, doinstalujte ji (`sudo apt install libconfig9`
@@ -987,7 +946,7 @@ sudo systemctl disable --now bpq.service 2>/dev/null || true
 
 ### 12.4 Základní konfigurace `bpq32.cfg`
 
-Vytvořte `/home/pi/linbpq/bpq32.cfg` (volací znaky, lokátor a hesla upravte).
+Vytvořte `/home/ok2zaw/linbpq/bpq32.cfg` (volací znaky, lokátor a hesla upravte).
 Každý TNC je v LinBPQ samostatný port s vlastním TCP portem:
 
 ```text
@@ -1063,7 +1022,7 @@ Vyzkoušejte ruční spuštění (nejdřív musí běžet TNC z kroku 12.2), ote
 `http://<IP-Raspberry-Pi>:8008/` a pak LinBPQ ukončete Ctrl+C:
 
 ```bash
-cd /home/pi/linbpq && ./linbpq
+cd /home/ok2zaw/linbpq && ./linbpq
 ```
 
 ### 12.5 Spouštění ze záložky BPQ
@@ -1073,13 +1032,13 @@ LinBPQ, zobrazuje jejich stav a výpis a nastavuje start po spuštění Raspberr
 Pi se zpožděním. LinBPQ se vždy spouští až po obou TNC. Na rozdíl od VARA a
 VarAC nepotřebují přihlášený desktop.
 
-1. Povolte uživatelský systemd bez přihlášení (stačí jednou, viz i 11.10):
+1. Povolte uživatelský systemd bez přihlášení (stačí jednou, viz i 11.5):
 
    ```bash
-   sudo loginctl enable-linger pi
+   sudo loginctl enable-linger ok2zaw
    ```
 
-2. Na záložce **BPQ** zkontrolujte cestu k LinBPQ (`/home/pi/linbpq/linbpq`),
+2. Na záložce **BPQ** zkontrolujte cestu k LinBPQ (`/home/ok2zaw/linbpq/linbpq`),
    zaškrtněte automatický start, nastavte zpoždění (např. TNC 0 s,
    LinBPQ 15 s) a uložte.
 3. Tlačítkem **Spustit** spusťte TNC a potom LinBPQ. Po změně nastavení
@@ -1168,7 +1127,7 @@ uživateli BBS:
 2. Do `/etc/aliases` přidejte řádek (zpětné lomítko zabrání smyčce):
 
    ```text
-   pi: \pi, ok2zaw@bbs.lan
+   ok2zaw: \ok2zaw, ok2zaw@bbs.lan
    ```
 
    ```bash
@@ -1182,7 +1141,7 @@ uživateli BBS:
    [destination]
    type = MDA_external
    path = /usr/sbin/sendmail
-   arguments = ("-i", "-f", "%(sender)", "pi")
+   arguments = ("-i", "-f", "%(sender)", "ok2zaw")
    ```
 
 Každá stažená zpráva pak přistane v místní schránce i v BBS u uživatele

@@ -35,7 +35,7 @@ class BpqServicesTests(unittest.TestCase):
         self.paths = [
             patch.object(bpq_services, "UNIT_DIR", self.unit_dir),
             patch.object(bpq_services, "TNC_CONFIG_DIR", self.tnc_dir),
-            patch.object(bpq_services, "TNC_SCRIPT", "/home/pi/meshcom-gateway/lora_tnc/Start_lora-tnc.py"),
+            patch.object(bpq_services, "TNC_SCRIPT", "/home/ok2zaw/meshcom-gateway/lora_tnc/Start_lora-tnc.py"),
             patch.object(bpq_services.os.path, "isabs", return_value=True),
             patch.object(bpq_services.os, "access", return_value=True),
         ]
@@ -72,7 +72,7 @@ class BpqServicesTests(unittest.TestCase):
     def test_units_pass_instance_config_and_order_linbpq(self):
         tnc_unit = bpq_services.unit_content("tnc2", self.cfg)
         self.assertIn(f"Environment=LORA_TNC_CONFIG={os.path.join(self.tnc_dir, 'tnc2.json')}", tnc_unit)
-        self.assertIn("ExecStart=/usr/bin/python3 -u /home/pi/meshcom-gateway/lora_tnc/Start_lora-tnc.py", tnc_unit)
+        self.assertIn("ExecStart=/usr/bin/python3 -u /home/ok2zaw/meshcom-gateway/lora_tnc/Start_lora-tnc.py", tnc_unit)
         bpq_unit = bpq_services.unit_content("linbpq", self.cfg)
         self.assertIn("After=meshcom-tnc1.service meshcom-tnc2.service", bpq_unit)
         self.assertIn("ExecStartPre=/bin/sleep 15", bpq_unit)

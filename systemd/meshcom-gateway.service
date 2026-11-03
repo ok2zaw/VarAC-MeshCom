@@ -5,11 +5,11 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/meshcom-gateway
-EnvironmentFile=-/home/pi/meshcom-gateway/.env
-ExecStart=/home/pi/meshcom-gateway/.venv/bin/python /home/pi/meshcom-gateway/gateway.py
+User=ok2zaw
+Group=ok2zaw
+WorkingDirectory=/home/ok2zaw/meshcom-gateway
+EnvironmentFile=-/home/ok2zaw/meshcom-gateway/.env
+ExecStart=/home/ok2zaw/meshcom-gateway/.venv/bin/python /home/ok2zaw/meshcom-gateway/gateway.py
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15

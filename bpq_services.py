@@ -4,7 +4,7 @@ Manage two LoRa KISS TNCs (TNC1, TNC2) and LinBPQ as systemd user services.
 Unlike the HF modem programs (radio_apps.py), these run without a desktop,
 so the web UI writes regular unit files to ~/.config/systemd/user and uses
 `systemctl --user enable` for start at boot (requires lingering for the
-account: `sudo loginctl enable-linger pi`). The configured delay becomes an
+account: `sudo loginctl enable-linger ok2zaw`). The configured delay becomes an
 ExecStartPre sleep; LinBPQ is ordered after the TNCs so their KISS TCP
 ports are already listening.
 

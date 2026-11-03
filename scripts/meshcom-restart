@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REQUEST_FILE=/home/pi/meshcom-gateway/.meshcom-restart-request
+REQUEST_FILE=/home/ok2zaw/meshcom-gateway/.meshcom-restart-request
 [ -f "$REQUEST_FILE" ] || exit 0
 rm -f -- "$REQUEST_FILE"
 

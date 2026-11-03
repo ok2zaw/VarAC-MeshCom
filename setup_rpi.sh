@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Do not run setup_rpi.sh with sudo. Run it as pi; use sudo only for system packages and systemd."
+  echo "Do not run setup_rpi.sh with sudo. Run it as the service user (e.g. ok2zaw); use sudo only for system packages and systemd."
   exit 1
 fi
 
@@ -20,7 +20,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-mkdir -p /home/pi/Maildir/new /home/pi/Maildir/cur /home/pi/Maildir/tmp
+mkdir -p "$HOME/Maildir/new" "$HOME/Maildir/cur" "$HOME/Maildir/tmp"
 
 if [ ! -f .env ] && [ -f .env.example ]; then
   cp .env.example .env

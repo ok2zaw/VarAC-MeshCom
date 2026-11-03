@@ -15,6 +15,9 @@ import time
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DB_PATH = os.path.join(BASE_DIR, "gateway.db")
+# Default paths live in the home of the account running the services.
+HOME_DIR = os.path.expanduser("~")
+WINE_PREFIX = os.path.join(HOME_DIR, ".wine")
 
 _config_lock = threading.Lock()
 _ENV_PREFIX = "MESHCOM_"
@@ -31,8 +34,8 @@ DEFAULT_CONFIG = {
     "smtp_use_tls": True,
     "mail_from": "meshcom-gateway@example.com",
     "mail_to": "you@example.com",
-    "maildir_new": "/home/pi/Maildir/new",
-    "maildir_cur": "/home/pi/Maildir/cur",
+    "maildir_new": os.path.join(HOME_DIR, "Maildir", "new"),
+    "maildir_cur": os.path.join(HOME_DIR, "Maildir", "cur"),
     "imap_host": "",
     "imap_port": 993,
     "imap_user": "",
@@ -45,8 +48,8 @@ DEFAULT_CONFIG = {
     "web_username": "admin",
     "web_password": "changeme",
     "radio_display": ":0",
-    "radio_wine_prefix": "/home/pi/.wine",
-    "radio_vara_path": "/home/pi/.wine/drive_c/VARA/VARA.exe",
+    "radio_wine_prefix": WINE_PREFIX,
+    "radio_vara_path": os.path.join(WINE_PREFIX, "drive_c", "VARA", "VARA.exe"),
     "radio_vara_autostart": False,
     "radio_vara_delay": 10,
     "radio_mercury_command": "mercury",
@@ -56,7 +59,7 @@ DEFAULT_CONFIG = {
     "radio_mercury_gui": False,
     "radio_mercury_gui_port": 10080,
     "radio_mercury_no_waterfall": False,
-    "radio_varac_path": "/home/pi/.wine/drive_c/VarAC/VarAC.exe",
+    "radio_varac_path": os.path.join(WINE_PREFIX, "drive_c", "VarAC", "VarAC.exe"),
     "radio_varac_autostart": False,
     "radio_varac_delay": 40,
     # LoRa TNC defaults follow the OK2ZAW dual-TNC board (IRQ 5 / 19).
@@ -82,7 +85,7 @@ DEFAULT_CONFIG = {
             "sync_word": "0x12",
         }.items()
     },
-    "linbpq_path": "/home/pi/linbpq/linbpq",
+    "linbpq_path": os.path.join(HOME_DIR, "linbpq", "linbpq"),
     "linbpq_autostart": False,
     "linbpq_delay": 15,
     "linbpq_web_port": 8008,
