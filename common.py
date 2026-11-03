@@ -582,6 +582,32 @@ def get_own_position() -> dict | None:
         conn.close()
 
 
+# Station presence from the time since it was last heard (same defaults as MeshCom WebDesk).
+STATION_RECENT_SECONDS = 45 * 60
+STATION_UNCERTAIN_SECONDS = 120 * 60
+STATION_PRESENCE = {
+    "recent": ("🟢", "aktivní"),
+    "uncertain": ("🟡", "nejisté"),
+    "gone": ("⚪", "pryč"),
+}
+
+
+def station_presence(last_seen: float, now: float = None) -> str:
+    age = (time.time() if now is None else now) - last_seen
+    if age < STATION_RECENT_SECONDS:
+        return "recent"
+    return "uncertain" if age < STATION_UNCERTAIN_SECONDS else "gone"
+
+
+def age_label(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        return f"před {seconds // 60} min"
+    if seconds < 86400:
+        return f"před {seconds // 3600} h {seconds % 3600 // 60} min"
+    return f"před {seconds // 86400} d"
+
+
 def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance (haversine, mean Earth radius)."""
     phi1, phi2 = math.radians(lat1), math.radians(lat2)

@@ -293,6 +293,16 @@ class GatewayEmailTests(unittest.TestCase):
         # Brno - Praha is about 185 km
         self.assertAlmostEqual(common.distance_km(49.1951, 16.6068, 50.0755, 14.4378), 185, delta=2)
 
+    def test_station_presence_follows_time_since_last_heard(self):
+        now = 1_000_000
+        self.assertEqual(common.station_presence(now - 44 * 60, now), "recent")
+        self.assertEqual(common.station_presence(now - 45 * 60, now), "uncertain")
+        self.assertEqual(common.station_presence(now - 119 * 60, now), "uncertain")
+        self.assertEqual(common.station_presence(now - 120 * 60, now), "gone")
+        self.assertEqual(common.age_label(125), "před 2 min")
+        self.assertEqual(common.age_label(3 * 3600 + 5 * 60), "před 3 h 5 min")
+        self.assertEqual(common.age_label(2 * 86400 + 10), "před 2 d")
+
     def test_station_page_draws_map_with_distance_and_direct_links(self):
         summary = [
             {"station": "OK1AAA-1", "heard_from": "OK1AAA-1", "source_path": "OK1AAA-1", "observations": 3,
@@ -315,6 +325,8 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertIn('"direct": true', page)
         self.assertNotIn('"station": "OK2BBB-2"', page)   # no position, table only
         self.assertIn("184.3 km", page)
+        self.assertIn('"presence": "gone"', page)   # last_seen 0 = long ago
+        self.assertIn('title="pryč – před', page)
         self.assertIn("leaflet@1.9.4", page)
 
     def test_station_observations_store_rf_position_signal_and_telemetry(self):

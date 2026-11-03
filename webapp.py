@@ -288,8 +288,12 @@ def stations():
     history = common.get_station_history(since, until, selected_station, limit=500)
 
     own_position = common.get_own_position()
+    now = time.time()
     map_stations = []
     for row in summary:
+        row["presence"] = common.station_presence(row["last_seen"], now)
+        row["presence_icon"], row["presence_label"] = common.STATION_PRESENCE[row["presence"]]
+        row["age_label"] = common.age_label(now - row["last_seen"])
         row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
         row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
         row["direct"] = row["heard_from"] == row["station"]
@@ -302,7 +306,8 @@ def stations():
         map_stations.append({
             key: row[key] for key in (
                 "station", "latitude", "longitude", "direct", "heard_from", "source_path", "rssi",
-                "snr", "altitude", "battery_percent", "last_seen_label", "distance_km", "observations")
+                "snr", "altitude", "battery_percent", "last_seen_label", "distance_km", "observations",
+                "presence", "presence_icon", "presence_label", "age_label")
         } | {"url": url_for("stations", start=start_day.isoformat(), end=end_day.isoformat(),
                             station=row["station"], _anchor="station-history")})
     for row in history:
