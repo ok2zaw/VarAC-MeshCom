@@ -261,7 +261,8 @@ class GatewayEmailTests(unittest.TestCase):
         with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
              patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
              patch.object(webapp.common, "count_station_history", return_value=0) as count_history, \
-             patch.object(webapp.common, "get_station_history", return_value=[]) as history:
+             patch.object(webapp.common, "get_station_history", return_value=[]) as history, \
+             patch.object(webapp.common, "get_own_position", return_value=None):
             response = webapp.app.test_client().get(
                 "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1"
             )
@@ -272,6 +273,49 @@ class GatewayEmailTests(unittest.TestCase):
         summary.assert_called_once_with(expected_start, expected_end)
         count_history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1")
         history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1", limit=500)
+
+    def test_own_node_position_is_stored_from_node_beacon_only(self):
+        beacon = {"src_type": "node", "type": "pos", "src": "OK9NODE-1", "lat": 49.1951,
+                  "lat_dir": "N", "long": 16.6068, "long_dir": "E", "alt": 237}
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            self.assertIsNone(common.get_own_position())
+            self.assertFalse(common.record_own_position({**beacon, "src_type": "lora"}, "OK9NODE-1"))
+            self.assertFalse(common.record_own_position({**beacon, "src": "OK1AAA-1"}, "OK9NODE-1"))
+            self.assertFalse(common.record_own_position({**beacon, "lat": 0, "long": 0}, "OK9NODE-1"))
+            self.assertTrue(common.record_own_position(beacon, "ok9node-1"))
+            self.assertTrue(common.record_own_position({**beacon, "lat": 50.0755, "long": 14.4378}, "OK9NODE-1"))
+            position = common.get_own_position()
+
+        self.assertEqual((position["latitude"], position["longitude"]), (50.0755, 14.4378))
+        self.assertEqual(position["altitude"], 237)
+        # Brno - Praha is about 185 km
+        self.assertAlmostEqual(common.distance_km(49.1951, 16.6068, 50.0755, 14.4378), 185, delta=2)
+
+    def test_station_page_draws_map_with_distance_and_direct_links(self):
+        summary = [
+            {"station": "OK1AAA-1", "heard_from": "OK1AAA-1", "source_path": "OK1AAA-1", "observations": 3,
+             "first_seen": 0, "last_seen": 0, "latitude": 50.0755, "longitude": 14.4378, "rssi": -101,
+             "snr": 4, "altitude": 300, "battery_percent": 80, "last_packet_type": "pos"},
+            {"station": "OK2BBB-2", "heard_from": "OK2RPT-9", "source_path": "OK2BBB-2,OK2RPT-9",
+             "observations": 1, "first_seen": 0, "last_seen": 0, "latitude": None, "longitude": None,
+             "rssi": -90, "snr": 7, "altitude": None, "battery_percent": None, "last_packet_type": "msg"},
+        ]
+        with patch.object(webapp.common, "load_config", return_value={"web_password": "", "callsign": "OK9NODE-1"}), \
+             patch.object(webapp.common, "get_station_summary", return_value=summary), \
+             patch.object(webapp.common, "count_station_history", return_value=0), \
+             patch.object(webapp.common, "get_station_history", return_value=[]), \
+             patch.object(webapp.common, "get_own_position",
+                          return_value={"latitude": 49.1951, "longitude": 16.6068, "altitude": 237}):
+            page = webapp.app.test_client().get("/stations").get_data(as_text=True)
+
+        self.assertIn('id="station-map"', page)
+        self.assertIn('"station": "OK1AAA-1"', page)
+        self.assertIn('"direct": true', page)
+        self.assertNotIn('"station": "OK2BBB-2"', page)   # no position, table only
+        self.assertIn("184.3 km", page)
+        self.assertIn("leaflet@1.9.4", page)
 
     def test_station_observations_store_rf_position_signal_and_telemetry(self):
         with tempfile.TemporaryDirectory() as tmpdir:

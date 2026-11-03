@@ -262,6 +262,17 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS node_position (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                altitude REAL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS outgoing_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at REAL NOT NULL,
@@ -513,19 +524,8 @@ def _station_number(packet: dict, key: str, integer: bool = False):
     return int(number) if integer else number
 
 
-def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
-    packet_type = packet.get("type")
-    if packet.get("src_type") != "lora" or not isinstance(packet_type, str) or packet_type not in {"pos", "msg", "tele"}:
-        return False
-
-    source_path = packet.get("src")
-    if not isinstance(source_path, str):
-        return False
-    path = [part.strip().upper() for part in source_path.split(",") if part.strip()]
-    own_callsign = str(own_callsign or "").strip().upper()
-    if not path or path[0] == own_callsign:
-        return False
-
+def _packet_position(packet: dict) -> tuple:
+    """Signed (latitude, longitude) from MeshCom lat/lat_dir, long/long_dir; None if unusable."""
     latitude = _station_number(packet, "lat")
     latitude_direction = str(packet.get("lat_dir", "")).upper()
     if latitude is not None and latitude_direction in {"N", "S"}:
@@ -547,6 +547,63 @@ def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
     if latitude == 0 and longitude == 0:
         latitude = None
         longitude = None
+    return latitude, longitude
+
+
+def record_own_position(packet: dict, own_callsign: str = "") -> bool:
+    """Keep the position the own node beacons (src_type "node"), for the map and distances."""
+    source = str(packet.get("src", "")).split(",")[0].strip().upper()
+    if (packet.get("type") != "pos" or packet.get("src_type") != "node"
+            or not source or source != str(own_callsign or "").strip().upper()):
+        return False
+    latitude, longitude = _packet_position(packet)
+    if latitude is None or longitude is None:
+        return False
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO node_position (id, latitude, longitude, altitude, updated_at) "
+            "VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET latitude=excluded.latitude, "
+            "longitude=excluded.longitude, altitude=excluded.altitude, updated_at=excluded.updated_at",
+            (latitude, longitude, _station_number(packet, "alt"), time.time()),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_own_position() -> dict | None:
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM node_position WHERE id = 1").fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance (haversine, mean Earth radius)."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    a = (math.sin((phi2 - phi1) / 2) ** 2
+         + math.cos(phi1) * math.cos(phi2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2)
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
+    packet_type = packet.get("type")
+    if packet.get("src_type") != "lora" or not isinstance(packet_type, str) or packet_type not in {"pos", "msg", "tele"}:
+        return False
+
+    source_path = packet.get("src")
+    if not isinstance(source_path, str):
+        return False
+    path = [part.strip().upper() for part in source_path.split(",") if part.strip()]
+    own_callsign = str(own_callsign or "").strip().upper()
+    if not path or path[0] == own_callsign:
+        return False
+
+    latitude, longitude = _packet_position(packet)
 
     observation = {
         "observed_at": time.time(),

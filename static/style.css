@@ -209,7 +209,15 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .udp-table td:nth-child(-n+5) { white-space: nowrap; }
 .udp-payload { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .flash ol { margin: 0.4rem 0 0; padding-left: 1.2rem; }
-.station-table { min-width: 1180px; }
+.station-map { height: 420px; margin: 0 0 0.5rem; border: 1px solid var(--border); border-radius: 8px; }
+html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.9); }
+.map-legend { margin: 0 0 1.5rem; color: var(--text-muted); font-size: 11px; }
+.legend-dot { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; border-radius: 50%; vertical-align: -1px; }
+.legend-dot:first-child { margin-left: 0; }
+.legend-relay { width: 6px; height: 6px; border: 2px dashed #8a8a8a; }
+.legend-own { width: 6px; height: 6px; border: 3px solid #1f5fbf; background: #fff; }
+@media (max-width: 640px) { .station-map { height: 300px; } }
+.station-table { min-width: 1240px; }
 .station-table td { white-space: nowrap; }
 .station-table td:nth-child(5) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .mesh-table { min-width: 900px; }

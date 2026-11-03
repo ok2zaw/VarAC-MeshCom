@@ -41,7 +41,7 @@
 <div class="flash error" role="status">
   Z uzlu zatím nepřichází žádná data. Zkontrolujte:
   <ol>
-    <li>v uzlu MeshCom (konzole nebo aplikace): <code>--extudp on</code> a <code>--extudpip {{ local_ip or '&lt;IP-Raspberry-Pi&gt;' }}</code>, poté uzel restartujte (<code>--reboot</code>) a ověřte výpisem <code>--info</code>. Uzel posílá data jen na tuto jedinou adresu – pokud tam zůstala IP jiného počítače (např. s MeshCom klientem), Pi nedostane nic, i když odesílání z Pi funguje,</li>
+    <li>v uzlu MeshCom (konzole nebo aplikace): <code>--extudp on</code> a <code>--extudpip {{ local_ip or '&lt;IP-Raspberry-Pi&gt;' }}</code>, poté uzel <strong>restartujte</strong> (<code>--reboot</code>) – změna adresy se projeví až po restartu – a ověřte výpisem <code>--info</code>. Uzel posílá data jen na tuto jedinou adresu – pokud tam zůstala IP jiného počítače (např. s MeshCom klientem), Pi nedostane nic, i když odesílání z Pi funguje,</li>
     <li>sériovou konzoli uzlu po startu: má vypsat <code>[EXT]...now sending to IP …</code>. Hláška <code>[EXT] target … refused</code> znamená, že uzel adresu odmítl (broadcast, <code>0.0.0.0</code> nebo vlastní IP uzlu); <code>[EXT] no WiFI connection open</code> znamená, že uzel není připojen k Wi-Fi jako klient,</li>
     <li>že port nedrží jiný program: <code>sudo ss -lunp | grep {{ cfg.mesh_udp_port }}</code> (má jej mít jen <code>python</code> gateway),</li>
     <li>zda datagramy na Pi vůbec dorazí: <code>sudo tcpdump -ni any udp port {{ cfg.mesh_udp_port }}</code>,</li>

@@ -209,7 +209,14 @@ def udp_listener():
             log.warning("Could not record RF station observation: %s", exc)
 
         if packet.get("type") != "msg":
-            finish("RF pozorování" if recorded_station else "ignorován jiný typ")
+            own_position = False
+            if not recorded_station:
+                try:
+                    own_position = common.record_own_position(packet, cfg.get("callsign", ""))
+                except sqlite3.Error as exc:
+                    log.warning("Could not record own node position: %s", exc)
+            finish("RF pozorování" if recorded_station else
+                   "poloha vlastního uzlu" if own_position else "ignorován jiný typ")
             continue
 
         try:

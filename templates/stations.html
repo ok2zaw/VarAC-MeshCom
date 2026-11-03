@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block title %}RF stanice – MeshCom Gateway{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+{% endblock %}
 {% block content %}
 {% macro telemetry_values(row) -%}
   {%- set values = [] -%}
@@ -29,13 +35,29 @@
   <button type="submit">Filtrovat</button>
 </form>
 
+<h2 id="station-map-heading">Mapa</h2>
+{% if map_stations or own_position %}
+<div id="station-map" class="station-map" aria-labelledby="station-map-heading"></div>
+<p class="map-legend">
+  <span class="legend-dot" style="background:#2e9d4f"></span>RSSI ≥ −95 dBm
+  <span class="legend-dot" style="background:#dba41c"></span>−95 až −110
+  <span class="legend-dot" style="background:#d9622b"></span>&lt; −110
+  <span class="legend-dot legend-relay"></span>přes převaděč
+  <span class="legend-dot legend-own"></span>vlastní uzel
+  · čára = slyšeno napřímo
+  {% if not own_position %}· poloha vlastního uzlu zatím nepřišla (uzel ji posílá s majákem){% endif %}
+</p>
+{% else %}
+<p class="card-sub">V tomto období žádná stanice neposlala polohu.</p>
+{% endif %}
+
 <h2>Stanice v období</h2>
 <div class="table-wrap">
   <table class="msg-table station-table">
     <thead>
       <tr>
         <th>Stanice</th><th>Přijato přes</th><th>Rámce</th><th>Poprvé</th><th>Naposledy</th><th>Typ</th>
-        <th>RSSI</th><th>SNR</th><th>Poloha</th><th>Alt. raw</th><th>Baterie</th>
+        <th>RSSI</th><th>SNR</th><th>Poloha</th><th>Vzdálenost</th><th>Alt. raw</th><th>Baterie</th>
         <th>Zbývá hopů / LoRa</th><th>Firmware</th><th>Telemetry</th>
       </tr>
     </thead>
@@ -51,6 +73,7 @@
         <td>{% if row.rssi is not none %}{{ row.rssi }} dBm{% else %}—{% endif %}</td>
         <td>{% if row.snr is not none %}{{ row.snr }} dB{% else %}—{% endif %}</td>
         <td>{% if row.latitude is not none and row.longitude is not none %}{{ '%.4f'|format(row.latitude) }}, {{ '%.4f'|format(row.longitude) }}{% else %}—{% endif %}</td>
+        <td>{% if row.distance_km is not none %}{{ row.distance_km }} km{% else %}—{% endif %}</td>
         <td>{{ row.altitude if row.altitude is not none else '—' }}</td>
         <td>{% if row.battery_percent is not none %}{{ row.battery_percent }} %{% else %}—{% endif %}</td>
         <td>{% if row.max_hop is not none %}{{ row.max_hop }}{% else %}—{% endif %}{% if row.lora_mod is not none %} / {{ row.lora_mod }}{% endif %}</td>
@@ -58,7 +81,7 @@
         <td>{{ telemetry_values(row) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="14">V tomto období zatím nejsou žádná RF pozorování.</td></tr>
+      <tr><td colspan="15">V tomto období zatím nejsou žádná RF pozorování.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -95,4 +118,63 @@
   </table>
 </div>
 
+{% if map_stations or own_position %}
+<script>
+(() => {
+  const container = document.getElementById("station-map");
+  if (typeof L === "undefined") {
+    container.textContent = "Mapu se nepodařilo načíst (knihovna Leaflet a mapové podklady vyžadují internet).";
+    return;
+  }
+  const stations = {{ map_stations|tojson }};
+  const own = {{ own_position|tojson }};
+  const ownCall = {{ own_callsign|tojson }};
+  const map = L.map(container, { scrollWheelZoom: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const signalColor = (rssi) => rssi == null ? "#8a8a8a" : rssi >= -95 ? "#2e9d4f" : rssi >= -110 ? "#dba41c" : "#d9622b";
+  const bounds = [];
+
+  if (own) {
+    const point = [own.latitude, own.longitude];
+    bounds.push(point);
+    L.circleMarker(point, { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
+      .addTo(map).bindPopup(`<strong>${esc(ownCall)}</strong><br>vlastní uzel`);
+  }
+  for (const s of stations) {
+    const point = [s.latitude, s.longitude];
+    bounds.push(point);
+    const color = s.direct ? signalColor(s.rssi) : "#8a8a8a";
+    if (own && s.direct) {
+      L.polyline([[own.latitude, own.longitude], point], { color, weight: 2, opacity: 0.7 }).addTo(map);
+    }
+    const signal = s.rssi != null ? `${s.rssi} dBm${s.snr != null ? ` / ${s.snr} dB` : ""}` : "—";
+    L.circleMarker(point, {
+      radius: 7, color, weight: 2, fillColor: color, fillOpacity: s.direct ? 0.85 : 0.35,
+      dashArray: s.direct ? null : "3 3",
+    }).addTo(map).bindPopup(
+      `<strong>${esc(s.station)}</strong><br>` +
+      `${s.direct ? "slyšeno napřímo" : "přes " + esc(s.heard_from)}<br>` +
+      `cesta: ${esc(s.source_path)}<br>` +
+      `signál: ${esc(signal)}` +
+      (s.distance_km != null ? `<br>vzdálenost: ${esc(s.distance_km)} km` : "") +
+      (s.altitude != null ? `<br>výška (raw): ${esc(s.altitude)}` : "") +
+      (s.battery_percent != null ? `<br>baterie: ${esc(s.battery_percent)} %` : "") +
+      `<br>naposledy: ${esc(s.last_seen_label)} · rámců ${esc(s.observations)}` +
+      `<br><a href="${esc(s.url)}">historie →</a>`
+    );
+  }
+  if (bounds.length === 1) {
+    map.setView(bounds[0], 11);
+  } else {
+    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 13 });
+  }
+})();
+</script>
+{% endif %}
 {% endblock %}

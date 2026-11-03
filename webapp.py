@@ -287,15 +287,33 @@ def stations():
     history_count = common.count_station_history(since, until, selected_station)
     history = common.get_station_history(since, until, selected_station, limit=500)
 
+    own_position = common.get_own_position()
+    map_stations = []
     for row in summary:
         row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
         row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["direct"] = row["heard_from"] == row["station"]
+        row["distance_km"] = None
+        if row["latitude"] is None or row["longitude"] is None:
+            continue
+        if own_position:
+            row["distance_km"] = round(common.distance_km(
+                own_position["latitude"], own_position["longitude"], row["latitude"], row["longitude"]), 1)
+        map_stations.append({
+            key: row[key] for key in (
+                "station", "latitude", "longitude", "direct", "heard_from", "source_path", "rssi",
+                "snr", "altitude", "battery_percent", "last_seen_label", "distance_km", "observations")
+        } | {"url": url_for("stations", start=start_day.isoformat(), end=end_day.isoformat(),
+                            station=row["station"], _anchor="station-history")})
     for row in history:
         row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
     return render_template(
         "stations.html",
         summary=summary,
+        map_stations=map_stations,
+        own_position=own_position,
+        own_callsign=str(common.load_config().get("callsign", "")).strip().upper(),
         history=history,
         history_count=history_count,
         selected_station=selected_station,
