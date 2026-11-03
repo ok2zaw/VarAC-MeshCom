@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}UDP monitor – MeshCom Gateway{% endblock %}
+{% block head_extra %}<meta http-equiv="refresh" content="5">{% endblock %}
+{% block content %}
+<h1>UDP monitor</h1>
+<p class="monitor-note">Surové datagramy mezi Raspberry Pi a MeshCom uzlem (posledních {{ packets|length }}). Stránka se obnovuje každých 5 sekund.</p>
+
+<div class="cards">
+  <div class="card {{ 'ok' if listener_alive else 'bad' }}">
+    <div class="card-label">Příjem UDP</div>
+    <div class="card-value">
+      {% if listener_alive %}🟢 Naslouchá{% elif gateway_alive %}🔴 Nenaslouchá{% else %}🔴 Démon neběží{% endif %}
+    </div>
+    <div class="card-sub">{{ cfg.listen_ip }}:{{ cfg.mesh_udp_port }}</div>
+    {% if udp.rx.last_error %}<div class="card-sub">{{ udp.rx.last_error }}</div>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-label">Přijato z uzlu</div>
+    <div class="card-value">{{ udp.rx.datagrams }} datagramů</div>
+    <div class="card-sub">
+      {% if udp.rx.last_at %}naposledy před {{ (now - udp.rx.last_at)|int }} s · {{ udp.rx.last_status }}
+      {% else %}Zatím nic nepřišlo{% endif %}
+    </div>
+  </div>
+
+  <div class="card {{ 'bad' if udp.tx.last_status == 'chyba' else '' }}">
+    <div class="card-label">Odesláno na uzel</div>
+    <div class="card-value">{{ udp.tx.datagrams }} datagramů</div>
+    <div class="card-sub">{{ cfg.mesh_node_ip }}:{{ cfg.mesh_udp_port }}</div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">IP Pi směrem k uzlu</div>
+    <div class="card-value">{{ local_ip or '—' }}</div>
+    <div class="card-sub">tuto adresu nastavte v uzlu jako --extudpip</div>
+  </div>
+</div>
+
+{% if not udp.rx.datagrams or not listener_alive %}
+<div class="flash error" role="status">
+  Z uzlu zatím nepřichází žádná data. Zkontrolujte:
+  <ol>
+    <li>v uzlu MeshCom (konzole nebo aplikace): <code>--extudp on</code> a <code>--extudpip {{ local_ip or '&lt;IP-Raspberry-Pi&gt;' }}</code>, poté uzel restartujte (<code>--reboot</code>) a ověřte výpisem <code>--info</code>. Uzel posílá data jen na tuto jedinou adresu – pokud tam zůstala IP jiného počítače (např. s MeshCom klientem), Pi nedostane nic, i když odesílání z Pi funguje,</li>
+    <li>sériovou konzoli uzlu po startu: má vypsat <code>[EXT]...now sending to IP …</code>. Hláška <code>[EXT] target … refused</code> znamená, že uzel adresu odmítl (broadcast, <code>0.0.0.0</code> nebo vlastní IP uzlu); <code>[EXT] no WiFI connection open</code> znamená, že uzel není připojen k Wi-Fi jako klient,</li>
+    <li>že port nedrží jiný program: <code>sudo ss -lunp | grep {{ cfg.mesh_udp_port }}</code> (má jej mít jen <code>python</code> gateway),</li>
+    <li>zda datagramy na Pi vůbec dorazí: <code>sudo tcpdump -ni any udp port {{ cfg.mesh_udp_port }}</code>,</li>
+    <li>firewall na Pi, např. <code>sudo ufw allow {{ cfg.mesh_udp_port }}/udp</code>, a izolaci klientů Wi-Fi (AP isolation) v routeru.</li>
+  </ol>
+</div>
+{% endif %}
+
+<form method="get" class="station-filter">
+  <label>Směr
+    <select name="direction" onchange="this.form.submit()">
+      <option value="" {{ 'selected' if not direction else '' }}>vše</option>
+      <option value="rx" {{ 'selected' if direction == 'rx' else '' }}>přijato (uzel → Pi)</option>
+      <option value="tx" {{ 'selected' if direction == 'tx' else '' }}>odesláno (Pi → uzel)</option>
+    </select>
+  </label>
+  <noscript><button type="submit">Filtrovat</button></noscript>
+</form>
+
+<div class="table-wrap">
+  <table class="msg-table udp-table">
+    <thead>
+      <tr><th>Čas</th><th>Směr</th><th>Protistrana</th><th>Bajtů</th><th>Zpracování</th><th>Obsah</th></tr>
+    </thead>
+    <tbody>
+      {% for p in packets %}
+      <tr class="{{ 'row-error' if p.status and p.status.startswith('chyba') else '' }}">
+        <td>{{ p.ts_label }}</td>
+        <td>{{ '⬇️ RX' if p.direction == 'rx' else '⬆️ TX' }}</td>
+        <td>{{ p.peer or '—' }}</td>
+        <td>{{ p.size }}</td>
+        <td>{{ p.status or '' }}</td>
+        <td><code class="udp-payload">{{ p.payload }}</code></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Zatím žádné datagramy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

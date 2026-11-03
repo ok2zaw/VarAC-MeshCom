@@ -202,14 +202,32 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 }
 
 .station-filter label { display: grid; gap: 4px; color: var(--text-2); font-size: 11px; }
-.station-filter input { min-height: 30px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font-size: 12px; }
+.station-filter input, .station-filter select { min-height: 30px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font-size: 12px; }
 .station-filter button { min-height: 30px; padding: 0.35rem 0.8rem; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; font-size: 12px; font-weight: 600; }
 .station-filter button:hover { background: var(--accent-hover); }
 .table-wrap { width: 100%; overflow-x: auto; }
+.udp-table td:nth-child(-n+5) { white-space: nowrap; }
+.udp-payload { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.flash ol { margin: 0.4rem 0 0; padding-left: 1.2rem; }
 .station-table { min-width: 1180px; }
 .station-table td { white-space: nowrap; }
 .station-table td:nth-child(5) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
-.rf-message-table { min-width: 940px; }
+.mesh-table { min-width: 900px; }
+.mesh-table td:not(.mesh-body) { white-space: nowrap; }
+.mesh-table td:last-child { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.mesh-table a { color: var(--accent-text); text-decoration: none; }
+.own-message td { background: var(--accent-bg); }
+.channel-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 0.75rem; }
+.channel-tabs a { padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-2); font-size: 12px; text-decoration: none; }
+.channel-tabs a:hover { background: var(--fill-muted); }
+.channel-tabs a.active { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.channel-tabs a.main { font-weight: 700; }
+.channel-tabs a.kind-direct { border-style: dashed; }
+.delivery { padding: 1px 6px; border-radius: 4px; background: var(--fill-muted); white-space: nowrap; }
+.delivery-delivered, .delivery-gateway { background: var(--accent); color: var(--on-accent); }
+.delivery-failed { background: var(--danger-bg); color: var(--danger); }
+.delivery-table td:nth-child(-n+3), .delivery-table td:last-child { white-space: nowrap; }
+.channel-tabs .count { opacity: 0.7; font-size: 11px; }
 .rf-message-table td { white-space: nowrap; }
 .rf-message-table td:last-child { min-width: 280px; max-width: 560px; white-space: normal; overflow-wrap: anywhere; }
 .station-table a, .clear-filter { color: var(--accent-text); text-decoration: none; }

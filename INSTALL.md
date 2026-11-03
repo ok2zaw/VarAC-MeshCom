@@ -143,6 +143,27 @@ Webové rozhraní:
 
 Web běží na portu 8899. Přístup je chráněn podle nastavení `web_username` a `web_password` v `config.json`.
 
+### Cílová skupina e-mailu a potvrzení doručení
+
+E-mail se do MeshCom posílá do skupiny `mesh_group` z nastavení. Jinou skupinu
+určíte značkou `GROUP: <číslo>` kdekoli v předmětu; značka se z textu zprávy
+odstraní:
+
+| Předmět e-mailu | Cíl | Text v MeshCom |
+|---|---|---|
+| `Schůzka` | skupina z nastavení | `Jan: Schůzka - …` |
+| `GROUP: 262` | skupina 262 | `Jan: …` |
+| `GROUP: 2620 - Porucha` | skupina 2620 | `Jan: Porucha - …` |
+| `Re: GROUP: 9 Cvičení` | skupina 9 | `Jan: Re: Cvičení - …` |
+
+Stav doručení každé zprávy odeslané z webu nebo e-mailu je na stránce
+**Zprávy** (a u vlastních zpráv na stránce **Mesh zprávy**): *předáno uzlu* →
+*uzel vysílá* (echo uzlu) → *slyšel soused* → *doručeno přes bránu* nebo
+*potvrzeno příjemcem*; případně *drží schránka* nebo *nedoručeno*. Úplná
+potvrzení posílá firmware 4.40a a novější; u starších verzí potvrzují jen
+přímé zprávy (`ackNNN`). Zprávy do skupin příjemci nepotvrzují. Pro párování
+musí být `callsign` v nastavení stejná značka, jakou má uzel.
+
 ## 7. Systémová služba (systemd)
 
 Soubory v `systemd/` předpokládají projekt v `/home/ok2zaw/meshcom-gateway` a
@@ -483,7 +504,12 @@ prázdná:
    - `neplatný JSON` – datagram nejde přečíst,
    - 0 datagramů – uzel nic neposílá; zkontrolujte na uzlu `--extudp on` a
      `--extudpip <IP-Raspberry-Pi>`.
-2. Podívejte se, co skutečně chodí:
+2. Stránka **UDP monitor** ukazuje posledních 300 surových datagramů v obou
+   směrech (uzel → Pi i Pi → uzel) s výsledkem zpracování, zda gateway na
+   portu naslouchá, a IP adresu Pi, kterou je třeba zadat jako `--extudpip`.
+   Pokud se gateway nepodaří port otevřít (špatné `listen_ip`, port obsazený
+   jiným programem), zobrazí zde chybu a pokus každých 10 s opakuje.
+   Podívejte se také přímo na síť:
 
    ```bash
    sudo tcpdump -A -n -c 20 udp port 1799

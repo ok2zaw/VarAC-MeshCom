@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Mesh zprávy – MeshCom Gateway{% endblock %}
+{% block head_extra %}<meta http-equiv="refresh" content="15">{% endblock %}
+{% block content %}
+{% macro channel_label(name, kind) -%}
+  {%- if kind == 'broadcast' -%}* všichni{%- elif kind == 'group' -%}#{{ name }}{%- else -%}{{ name }}{%- endif -%}
+{%- endmacro %}
+
+<h1>Mesh zprávy</h1>
+<p class="monitor-note">Textové zprávy, které uzel předal přes UDP: zaslechnuté přes LoRa, přijaté z internetové brány a echo vlastních zpráv. Seřazené podle cíle: <strong>*</strong> je zpráva pro všechny, číslo je skupina, značka je přímá zpráva. E-mailem se přeposílá jen skupina {{ main_group or '—' }}. Stránka se obnovuje každých 15 sekund.</p>
+
+<form method="get" class="station-filter">
+  <label>Od
+    <input type="date" name="start" value="{{ start_date }}" required>
+  </label>
+  <label>Do
+    <input type="date" name="end" value="{{ end_date }}" required>
+  </label>
+  {% if channel %}<input type="hidden" name="channel" value="{{ channel }}">{% endif %}
+  {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+  <button type="submit">Filtrovat</button>
+</form>
+
+<nav class="channel-tabs" aria-label="Skupiny">
+  <a href="{{ url_for('mesh_messages', start=start_date, end=end_date) }}"
+     class="{{ 'active' if not channel and not kind else '' }}">Vše</a>
+  <a href="{{ url_for('mesh_messages', start=start_date, end=end_date, kind='group') }}"
+     class="{{ 'active' if kind == 'group' else '' }}">Všechny skupiny</a>
+  <a href="{{ url_for('mesh_messages', start=start_date, end=end_date, kind='direct') }}"
+     class="{{ 'active' if kind == 'direct' else '' }}">Přímé zprávy</a>
+  {% for row in channels %}
+  <a href="{{ url_for('mesh_messages', start=start_date, end=end_date, channel=row.channel) }}"
+     class="{{ 'active' if channel == row.channel else '' }} {{ 'main' if row.channel == main_group else '' }} kind-{{ row.kind }}"
+     title="naposledy {{ row.last_at_label }}">
+    {{ channel_label(row.channel, row.kind) }} <span class="count">{{ row.messages }}</span>
+  </a>
+  {% endfor %}
+</nav>
+
+<p class="card-sub">{{ total }} zpráv v období{% if total > rows|length %}; zobrazeno {{ rows|length }} nejnovějších{% endif %}.</p>
+
+<div class="table-wrap">
+  <table class="msg-table mesh-table">
+    <thead>
+      <tr><th>Čas</th><th>Cíl</th><th>Od</th><th>Zpráva</th><th>Příjem</th><th>Cesta</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="{{ 'own-message' if row.station == own_callsign else '' }}">
+        <td>{{ row.observed_at_label }}</td>
+        <td><a href="{{ url_for('mesh_messages', start=start_date, end=end_date, channel=row.channel) }}">{{ channel_label(row.channel, row.kind) }}</a></td>
+        <td>{{ row.station }}</td>
+        <td class="mesh-body">{{ row.body }}</td>
+        <td>
+          {% if row.src_type == 'node' %}vlastní{% if row.delivery %} · <span class="delivery delivery-{{ row.delivery.status }}">{{ row.delivery.status_label }}{% if row.delivery.ack_from %} ({{ row.delivery.ack_from }}){% endif %}</span>{% endif %}
+          {% elif row.src_type == 'udp' %}internet
+          {% else %}LoRa{% if row.rssi is not none %} · {{ row.rssi }} dBm{% endif %}{% if row.snr is not none %} / {{ row.snr }} dB{% endif %}
+          {% endif %}
+        </td>
+        <td title="{{ row.source_path }} → {{ row.destination_path }}">{{ row.source_path }}{% if ',' in row.destination_path %} → {{ row.destination_path }}{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">V tomto období nejsou žádné zprávy{% if channel %} pro {{ channel_label(channel, 'broadcast' if channel == '*' else ('group' if channel.isdigit() else 'direct')) }}{% endif %}.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

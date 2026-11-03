@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -60,43 +61,196 @@ class GatewayEmailTests(unittest.TestCase):
 
         git.assert_not_called()
 
-    def test_other_rf_messages_store_only_lora_messages_outside_configured_group(self):
+    def test_mesh_messages_are_stored_per_channel_without_duplicates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
                 common.init_db()
-                other_channel = {
+                group = {
                     "src_type": "lora",
                     "type": "msg",
                     "src": "OK1AAA-1,OK2BBB-2",
                     "dst": "OK3CCC-3,54321",
-                    "msg": "RF check",
-                    "msg_id": "0123ABCD",
+                    "msg": "RF check{034",
+                    "msg_id": "0123A0CD",
                     "rssi": -94,
                     "snr": 5,
                 }
 
-                self.assertTrue(common.record_other_rf_message(
-                    other_channel, "OK9NODE-1", "12345"
-                ))
-                self.assertFalse(common.record_other_rf_message(
-                    {**other_channel, "dst": "OK3CCC-3,12345"}, "OK9NODE-1", "12345"
-                ))
-                self.assertFalse(common.record_other_rf_message(
-                    {**other_channel, "src_type": "udp"}, "OK9NODE-1", "12345"
-                ))
-                self.assertFalse(common.record_other_rf_message(
-                    {**other_channel, "src": "OK9NODE-1"}, "OK9NODE-1", "12345"
-                ))
+                self.assertTrue(common.record_rf_message(group, "OK9NODE-1"))
+                # Firmware retry: attempt counter in bits 10-11 of msg_id.
+                self.assertFalse(common.record_rf_message({**group, "msg_id": "0123A4CD"}, "OK9NODE-1"))
+                # Relay copy of a foreign frame from the node itself.
+                self.assertFalse(common.record_rf_message(
+                    {**group, "src_type": "node", "msg_id": "11111111"}, "OK9NODE-1"))
+                self.assertFalse(common.record_rf_message(
+                    {**group, "msg": "OK1AAA-1:ack034", "msg_id": "22222222"}, "OK9NODE-1"))
+                self.assertFalse(common.record_rf_message(
+                    {**group, "msg": "{CET}2026-11-03 18:00:00", "msg_id": "33333333"}, "OK9NODE-1"))
+                self.assertTrue(common.record_rf_message(
+                    {**group, "dst": "*", "msg": "CQ", "msg_id": "44444444"}, "OK9NODE-1"))
+                self.assertTrue(common.record_rf_message(
+                    {"src_type": "node", "type": "msg", "src": "OK9NODE-1", "dst": "OK1AAA-1",
+                     "msg": "73{001", "msg_id": "55555555"}, "OK9NODE-1"))
 
                 rows = common.get_heard_rf_messages(0, 4_102_444_800, "54321")
-                count = common.count_heard_rf_messages(0, 4_102_444_800)
+                direct = common.get_heard_rf_messages(0, 4_102_444_800, kind="direct")
+                groups = common.count_heard_rf_messages(0, 4_102_444_800, kind="group")
+                channels = common.get_rf_channel_summary(0, 4_102_444_800)
 
-        self.assertEqual(count, 1)
+        self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["station"], "OK1AAA-1")
         self.assertEqual(rows[0]["source_path"], "OK1AAA-1,OK2BBB-2")
-        self.assertEqual(rows[0]["channel"], "54321")
         self.assertEqual(rows[0]["body"], "RF check")
         self.assertEqual(rows[0]["rssi"], -94)
+        self.assertEqual([(r["channel"], r["src_type"], r["body"]) for r in direct],
+                         [("OK1AAA-1", "node", "73")])
+        self.assertEqual(groups, 1)
+        self.assertEqual([(c["channel"], c["kind"]) for c in channels],
+                         [("*", "broadcast"), ("54321", "group"), ("OK1AAA-1", "direct")])
+
+    def test_group_message_is_emailed_once_and_own_echo_is_not(self):
+        cfg = {"listen_ip": "127.0.0.1", "mesh_udp_port": 1799, "mesh_group": "12345",
+               "callsign": "OK9NODE-1"}
+        packet = {"src_type": "lora", "type": "msg", "src": "OK1AAA-1", "dst": "12345",
+                  "msg": "Hello{012", "msg_id": "0000ABCD"}
+        datagrams = [
+            json.dumps(packet).encode(),
+            json.dumps({**packet, "msg_id": "0000AFCD"}).encode(),  # retry
+            json.dumps({**packet, "src_type": "node", "src": "OK9NODE-1", "msg_id": "00001111"}).encode(),
+        ]
+
+        class FakeSocket:
+            def recvfrom(self, size):
+                if datagrams:
+                    return datagrams.pop(0), ("192.168.1.50", 1799)
+                raise KeyboardInterrupt
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")), \
+             patch.object(gateway.common, "load_config", return_value=cfg), \
+             patch.object(gateway, "bind_udp_listener", return_value=FakeSocket()), \
+             patch.object(gateway, "send_email") as send_email, \
+             patch.object(gateway.common, "log_message"):
+            common.init_db()
+            with self.assertRaises(KeyboardInterrupt):
+                gateway.udp_listener()
+            statuses = [p["status"] for p in common.get_udp_packets()]
+
+        send_email.assert_called_once_with(cfg, "[MeshCom 12345] OK1AAA-1", "From: OK1AAA-1\nGroup: 12345\n\nHello")
+        self.assertEqual(statuses, ["vlastní zpráva (echo uzlu)", "duplikát, potvrzení nebo echo",
+                                    "MeshCom zpráva → e-mail"])
+
+    def test_delivery_is_tracked_from_node_echo_and_acks(self):
+        own = "OK9NODE-1"
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            group_id = common.record_outgoing_message("web", "12345", "Hello group")
+            direct_id = common.record_outgoing_message("email", "OK1AAA-1", "Hi Jan")
+            old_fw_id = common.record_outgoing_message("web", "OK2BBB-2", "Old firmware")
+
+            # Node echoes: the group one has no {NNN}, direct ones do.
+            self.assertEqual(common.track_delivery({"src_type": "node", "type": "msg", "src": own,
+                "dst": "12345", "msg": "Hello group", "msg_id": "AAAA0001"}, own), "echo")
+            self.assertEqual(common.track_delivery({"src_type": "node", "type": "msg", "src": own,
+                "dst": "DB0RPT-1,OK1AAA-1", "msg": "Hi Jan{007", "msg_id": "AAAA0002"}, own), "echo")
+            common.track_delivery({"src_type": "node", "type": "msg", "src": own,
+                "dst": "OK2BBB-2", "msg": "Old firmware{042", "msg_id": "AAAA0003"}, own)
+
+            # Relay heard repeating our group message, then the 4.40a JSON acks.
+            self.assertEqual(common.track_delivery({"src_type": "lora", "type": "msg", "src": f"{own},DB0RPT-1",
+                "dst": "12345", "msg": "Hello group", "msg_id": "AAAA0001"}, own), "heard")
+            self.assertEqual(common.track_delivery({"type": "ack", "msg_id": "AAAA0002", "status": 0}, own), "heard")
+            self.assertEqual(common.track_delivery(
+                {"type": "ack", "msg_id": "AAAA0002", "status": 2, "from": "OK1AAA-1", "via": "udp"}, own), "delivered")
+            # A late "failed" never downgrades a confirmed message.
+            self.assertIsNone(common.track_delivery({"type": "ack", "msg_id": "AAAA0002", "status": 3}, own))
+            # Older firmware: text ACK from the recipient with the {NNN} number.
+            self.assertEqual(common.track_delivery({"src_type": "lora", "type": "msg", "src": "OK2BBB-2",
+                "dst": own, "msg": f"{own}:ack042", "msg_id": "BBBB0001"}, own), "delivered")
+            self.assertIsNone(common.track_delivery({"type": "ack", "msg_id": "FFFF0000", "status": 2}, own))
+
+            rows = {row["id"]: row for row in common.get_outgoing_messages()}
+            by_msg_id = common.get_delivery_by_msg_id(["AAAA0002"])
+
+        self.assertEqual(rows[group_id]["status"], "heard")
+        self.assertEqual(rows[direct_id]["status"], "delivered")
+        self.assertEqual(rows[direct_id]["ack_from"], "OK1AAA-1")
+        self.assertEqual(rows[direct_id]["seq"], "007")
+        self.assertEqual(rows[old_fw_id]["status_label"], "potvrzeno příjemcem")
+        self.assertEqual(by_msg_id["AAAA0002"]["status"], "delivered")
+
+    def test_send_udp_message_records_tracked_messages_only(self):
+        cfg = {"max_mesh_payload": 5, "mesh_node_ip": "127.0.0.1", "mesh_udp_port": 9}
+        with patch.object(gateway.socket, "socket"), \
+             patch.object(gateway, "update_udp_monitor"), \
+             patch.object(gateway, "log_udp_packet"), \
+             patch.object(gateway.common, "record_outgoing_message") as record:
+            gateway.send_udp_message(cfg, "262", "Hello world", source="email")
+            gateway.send_udp_message(cfg, "262", "untracked")
+
+        record.assert_called_once_with("email", "262", "Hello")
+
+    def test_email_subject_group_tag_selects_destination(self):
+        self.assertEqual(gateway.email_destination("Test", "12345"), ("12345", "Test"))
+        self.assertEqual(gateway.email_destination("GROUP: 262", "12345"), ("262", ""))
+        self.assertEqual(gateway.email_destination("group:#2620 - Porucha", "12345"), ("2620", "Porucha"))
+        self.assertEqual(gateway.email_destination("Re: GROUP: 9 Cvičení", "12345"), ("9", "Re: Cvičení"))
+        self.assertEqual(gateway.email_destination("Re: GROUP: 9", "12345"), ("9", ""))
+        self.assertEqual(gateway.email_destination("GROUPS: 9", "12345"), ("12345", "GROUPS: 9"))
+        self.assertEqual(gateway.build_mesh_messages("Jan <jan@example.com>", "", "Ahoj", [], 150), ["Jan: Ahoj"])
+
+    def test_maildir_email_goes_to_group_from_subject(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            maildir = os.path.join(tmpdir, "new")
+            os.makedirs(maildir)
+            cfg = {"maildir_new": maildir, "maildir_cur": os.path.join(tmpdir, "cur"),
+                   "poll_interval_seconds": 0, "max_mesh_payload": 150, "mesh_group": "12345"}
+            sends = []
+
+            def fake_sleep(seconds):
+                if sends or os.listdir(maildir):
+                    if sends:
+                        raise KeyboardInterrupt
+                    return
+                message = EmailMessage()
+                message["From"] = "Jan <jan@example.com>"
+                message["Subject"] = "GROUP: 262 Schůzka"
+                message.set_content("Zítra v 18:00")
+                with open(os.path.join(maildir, "1.eml"), "wb") as handle:
+                    handle.write(message.as_bytes())
+
+            with patch.object(gateway.common, "load_config", return_value=cfg), \
+                 patch.object(gateway.time, "sleep", side_effect=fake_sleep), \
+                 patch.object(gateway, "send_udp_message", side_effect=lambda *a, **k: sends.append((a, k))), \
+                 patch.object(gateway.common, "log_message"), \
+                 patch.object(gateway.common, "archive_mail_file", return_value="archived"):
+                with self.assertRaises(KeyboardInterrupt):
+                    gateway.poll_maildir()
+
+        self.assertEqual(sends, [((cfg, "262", "Jan: Schůzka - Zítra v 18:00"), {"source": "email"})])
+
+    def test_mesh_page_filters_by_channel_and_kind(self):
+        with patch.object(webapp.common, "load_config", return_value={"web_password": "", "mesh_group": "12345"}), \
+             patch.object(webapp.common, "get_rf_channel_summary", return_value=[
+                 {"channel": "*", "kind": "broadcast", "messages": 2, "last_at": 0},
+                 {"channel": "12345", "kind": "group", "messages": 1, "last_at": 0}]), \
+             patch.object(webapp.common, "count_heard_rf_messages", return_value=1) as count, \
+             patch.object(webapp.common, "get_heard_rf_messages", return_value=[
+                 {"observed_at": 0, "channel": "*", "station": "OK1AAA-1", "body": "CQ CQ",
+                  "src_type": "lora", "rssi": -90, "snr": 4, "source_path": "OK1AAA-1",
+                  "destination_path": "*"}]) as messages:
+            client = webapp.app.test_client()
+            page = client.get("/mesh?start=2026-11-01&end=2026-11-03&channel=*").get_data(as_text=True)
+            client.get("/mesh?start=2026-11-01&end=2026-11-03&kind=direct")
+
+        since = datetime(2026, 11, 1).timestamp()
+        until = datetime(2026, 11, 4).timestamp()
+        self.assertEqual(messages.call_args_list[0].args, (since, until, "*"))
+        self.assertEqual(messages.call_args_list[1].kwargs["kind"], "direct")
+        self.assertIn("CQ CQ", page)
+        self.assertIn("* všichni", page)
+        self.assertIn("#12345", page)
 
     def test_udp_packet_decoding_tolerates_terminator_and_bom(self):
         payload = b'{"type": "pos", "src_type": "lora", "src": "OK1AAA-1"}'
@@ -107,11 +261,9 @@ class GatewayEmailTests(unittest.TestCase):
         with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
              patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
              patch.object(webapp.common, "count_station_history", return_value=0) as count_history, \
-             patch.object(webapp.common, "get_station_history", return_value=[]) as history, \
-             patch.object(webapp.common, "count_heard_rf_messages", return_value=0) as rf_count, \
-             patch.object(webapp.common, "get_heard_rf_messages", return_value=[]) as rf_messages:
+             patch.object(webapp.common, "get_station_history", return_value=[]) as history:
             response = webapp.app.test_client().get(
-                "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1&channel=54321"
+                "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1"
             )
 
         self.assertEqual(response.status_code, 200)
@@ -120,8 +272,6 @@ class GatewayEmailTests(unittest.TestCase):
         summary.assert_called_once_with(expected_start, expected_end)
         count_history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1")
         history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1", limit=500)
-        rf_count.assert_called_once_with(expected_start, expected_end, "54321")
-        rf_messages.assert_called_once_with(expected_start, expected_end, "54321", limit=500)
 
     def test_station_observations_store_rf_position_signal_and_telemetry(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,7 +355,7 @@ class GatewayEmailTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.location, "/messages#send-message")
-        send_udp.assert_called_once_with(cfg, "12345", "Maintenance starts")
+        send_udp.assert_called_once_with(cfg, "12345", "Maintenance starts", source="web")
         log_message.assert_called_once_with(
             "web_to_mesh", "12345", "Web → MeshCom", "Maintenance starts"
         )
@@ -252,6 +402,70 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(activity["rx"]["last_status"], "neplatný JSON")
         self.assertEqual(activity["tx"]["datagrams"], 0)
         self.assertEqual(activity["tx"]["last_error"], "Network unreachable")
+
+    def test_udp_packet_log_keeps_newest_datagrams_and_filters_direction(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database_path = os.path.join(tmpdir, "gateway.db")
+            with patch.object(common, "DB_PATH", database_path), \
+                 patch.object(common, "UDP_PACKET_LOG_LIMIT", 3):
+                common.init_db()
+                for index in range(4):
+                    common.record_udp_packet("rx", "192.168.1.50:1799", f'{{"n":{index}}}'.encode(), "přijato")
+                common.record_udp_packet("tx", "192.168.1.50:1799", b'{"type":"msg"}', "odesláno")
+
+                packets = common.get_udp_packets()
+                received = common.get_udp_packets(direction="rx")
+
+        self.assertEqual([p["payload"] for p in packets], ['{"type":"msg"}', '{"n":3}', '{"n":2}'])
+        self.assertEqual([p["payload"] for p in received], ['{"n":3}', '{"n":2}'])
+        self.assertEqual(packets[0]["size"], 14)
+
+    def test_udp_listener_retries_failed_bind_and_reports_error(self):
+        cfg = {"listen_ip": "192.168.99.99", "mesh_udp_port": 1799}
+        sockets = []
+
+        class FakeSocket:
+            def __init__(self, *args):
+                self.fail = not sockets
+                sockets.append(self)
+
+            def bind(self, address):
+                if self.fail:
+                    raise OSError("Cannot assign requested address")
+
+            def settimeout(self, value):
+                pass
+
+            def close(self):
+                pass
+
+        with patch.object(gateway.common, "load_config", return_value=cfg), \
+             patch.object(gateway.socket, "socket", FakeSocket), \
+             patch.object(gateway.time, "sleep") as sleep, \
+             patch.object(gateway, "update_udp_monitor") as monitor:
+            sock = gateway.bind_udp_listener()
+
+        self.assertIs(sock, sockets[1])
+        sleep.assert_called_once_with(gateway.UDP_BIND_RETRY_SECONDS)
+        self.assertIn("Cannot assign requested address", monitor.call_args_list[0].kwargs["error"])
+        self.assertEqual(monitor.call_args_list[1].kwargs["status"], "naslouchá na 192.168.99.99:1799")
+
+    def test_udp_monitor_page_shows_packets_and_listener_state(self):
+        cfg = {"web_password": "", "listen_ip": "0.0.0.0", "mesh_udp_port": 1799,
+               "mesh_node_ip": "127.0.0.1"}
+        packets = [{"ts": 0, "direction": "rx", "peer": "192.168.1.50:1799", "size": 20,
+                    "status": "RF pozorování", "payload": '{"type":"pos","src":"OK1ABC-1"}'}]
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.common, "get_udp_packets", return_value=packets) as get_packets, \
+             patch.object(webapp.common, "get_heartbeat", return_value=None):
+            response = webapp.app.test_client().get("/udp?direction=rx")
+
+        page = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        get_packets.assert_called_once_with(limit=200, direction="rx")
+        self.assertIn("OK1ABC-1", page)
+        self.assertIn("Démon neběží", page)
+        self.assertIn("--extudpip 127.0.0.1", page)
 
     def test_imap_settings_are_available_and_local_queue_writes_messages(self):
         cfg = {

@@ -11,7 +11,10 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - Přijímat zprávy z nakonfigurované MeshCom skupiny a odesílat je přes SMTP.
 - Načítat e-maily z `Maildir/new`; volitelně stahovat nepřečtené zprávy přes IMAP.
 - Převádět e-maily na MeshCom zprávy, dlouhé texty rozdělit podle limitu a
-	uvést názvy příloh bez odesílání jejich obsahu.
+	uvést názvy příloh bez odesílání jejich obsahu. Značka `GROUP: 262`
+	v předmětu pošle e-mail do zvolené skupiny místo skupiny z nastavení.
+- Sledovat stav doručení odeslaných zpráv (echo uzlu, potvrzení `ack`
+	z firmwaru 4.40a i textové `ackNNN` u přímých zpráv).
 - Archivovat úspěšně zpracované e-maily do `Maildir/cur`.
 - Zobrazit stav gateway, historii a konfiguraci ve webovém rozhraní.
 - Sledovat počet UDP datagramů RX/TX, čas a protistranu poslední události a
@@ -22,9 +25,13 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	musí být ExtUDP zapnuté (`--extudp on`) a cílová IP nastavená na Raspberry Pi
 	(`--extudpip <IP-Raspberry-Pi>`). Formát paketů popisuje [MeshCom ExtUDP
 	reference](https://docs.aprscaching.org/reference/meshcom-extudp/).
-- Zobrazit oddělenou časově a skupinově filtrovatelnou tabulku textových zpráv
-	zaslechnutých přes LoRa pro cíle mimo hlavní MeshCom skupinu. Text se ukládá
+- Na stránce **Mesh zprávy** zobrazit všechny textové zprávy z uzlu (LoRa,
+	internetová brána i echo vlastních zpráv) roztříděné podle cíle: `*` pro
+	všechny, číselné skupiny a přímé zprávy na značku. Duplicitní opakování,
+	potvrzení (`ack`) a časové značky `{CET}` se vynechávají. Text se ukládá
 	lokálně do SQLite bez automatického mazání.
+- Na stránce **UDP monitor** sledovat surové datagramy mezi uzlem a Pi a stav
+	příjmu (naslouchání na portu, chyby, IP adresa pro `--extudpip`).
 - Odeslat z webové stavové stránky provozní zprávu do nakonfigurované MeshCom
 	skupiny; délka se kontroluje a pokus se zaznamená do historie.
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;

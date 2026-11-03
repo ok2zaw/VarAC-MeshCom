@@ -19,6 +19,29 @@
   </form>
 </section>
 
+<h2 id="delivery">Stav doručení odeslaných zpráv</h2>
+<p class="card-sub">Uzel nejdřív vrátí echo (uzel vysílá); potvrzení posílá firmware 4.40a a novější (JSON <code>ack</code>), u přímých zpráv i starší firmware (<code>ackNNN</code>). Zprávy do skupin příjemci nepotvrzují – nejvyšší stav je obvykle „slyšel soused“ nebo „doručeno přes bránu“.</p>
+<div class="table-wrap">
+<table class="msg-table delivery-table">
+  <thead>
+    <tr><th>Odesláno</th><th>Zdroj</th><th>Cíl</th><th>Text</th><th>Stav</th></tr>
+  </thead>
+  <tbody>
+    {% for m in outgoing %}
+    <tr>
+      <td>{{ m.created_label }}</td>
+      <td>{{ 'web' if m.source == 'web' else 'e-mail' }}</td>
+      <td>{{ '* všichni' if m.dst == '*' else ('#' ~ m.dst if m.dst.isdigit() else m.dst) }}</td>
+      <td>{{ m.body }}</td>
+      <td><span class="delivery delivery-{{ m.status }}">{{ m.status_label }}</span>{% if m.ack_from %} · {{ m.ack_from }}{% endif %}{% if m.status != 'sent' %} <span class="hint">({{ m.status_label_time }})</span>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">Zatím nebyla odeslána žádná zpráva.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
 <h2>Historie zpráv</h2>
 
 <table class="msg-table">

@@ -5,6 +5,8 @@ Web UI for the MeshCom <-> Email gateway.
 Pages:
   /            status dashboard (daemon alive?, counters, last 10 messages)
   /messages    full paginated message history
+  /mesh        mesh text messages sorted by group (*, number, callsign)
+  /udp         UDP monitor (raw datagrams to/from the MeshCom node)
   /config      edit configuration (writes config.json; the daemon
                re-reads it on its next loop, no restart needed for
                most settings)
@@ -23,6 +25,7 @@ import hmac
 import ipaddress
 import os
 import secrets
+import socket
 import time
 from datetime import date, datetime, time as datetime_time, timedelta
 from functools import wraps
@@ -160,7 +163,7 @@ def send_message():
         flash("Není nastavena cílová MeshCom skupina.", "error")
     else:
         try:
-            gateway.send_udp_message(cfg, group, message)
+            gateway.send_udp_message(cfg, group, message, source="web")
         except OSError as exc:
             common.log_message("web_to_mesh", group, "Web → MeshCom", message,
                                status="error", error=str(exc))
@@ -183,18 +186,20 @@ def messages():
     rows = common.get_recent_messages(limit=per_page, offset=(page - 1) * per_page)
     counts = common.count_messages()
     total_pages = max((counts["total"] + per_page - 1) // per_page, 1)
+    outgoing = common.get_outgoing_messages(limit=20)
+    for row in outgoing:
+        row["created_label"] = datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["status_label_time"] = datetime.fromtimestamp(row["status_at"]).strftime("%H:%M:%S")
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
-        cfg=common.load_config(),
+        cfg=common.load_config(), outgoing=outgoing,
     )
 
 
-@app.route("/stations")
-@requires_auth
-def stations():
+def parse_date_range(default_days: int):
+    """Inclusive ?start=&end= dates as (start_day, end_day, since, until)."""
     today = date.today()
-    default_start = (today - timedelta(days=29)).isoformat()
-    start_value = request.args.get("start", default_start)
+    start_value = request.args.get("start", (today - timedelta(days=default_days - 1)).isoformat())
     end_value = request.args.get("end", today.isoformat())
     try:
         start_day = date.fromisoformat(start_value)
@@ -203,23 +208,89 @@ def stations():
         abort(400, description="Neplatný formát data; použijte RRRR-MM-DD.")
     if start_day > end_day:
         abort(400, description="Datum od musí být před datem do.")
-
     since = datetime.combine(start_day, datetime_time.min).timestamp()
     until = datetime.combine(end_day + timedelta(days=1), datetime_time.min).timestamp()
+    return start_day, end_day, since, until
+
+
+@app.route("/mesh")
+@requires_auth
+def mesh_messages():
+    cfg = common.load_config()
+    start_day, end_day, since, until = parse_date_range(default_days=7)
+    channel = request.args.get("channel", "").strip().upper()
+    kind = request.args.get("kind", "")
+    if channel or kind not in {"group", "direct"}:
+        kind = ""
+    channels = common.get_rf_channel_summary(since, until)
+    for row in channels:
+        row["last_at_label"] = datetime.fromtimestamp(row["last_at"]).strftime("%Y-%m-%d %H:%M")
+    rows = common.get_heard_rf_messages(since, until, channel, limit=500, kind=kind)
+    own_callsign = str(cfg.get("callsign", "")).strip().upper()
+    delivery = common.get_delivery_by_msg_id([row["msg_id"] for row in rows if row["station"] == own_callsign])
+    for row in rows:
+        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["kind"] = common.channel_kind(row["channel"])
+        row["delivery"] = delivery.get(row["msg_id"]) if row["station"] == own_callsign else None
+    return render_template(
+        "mesh.html",
+        cfg=cfg, channels=channels, rows=rows,
+        total=common.count_heard_rf_messages(since, until, channel, kind=kind),
+        channel=channel, kind=kind,
+        own_callsign=own_callsign,
+        main_group=str(cfg.get("mesh_group", "")).strip().upper(),
+        start_date=start_day.isoformat(), end_date=end_day.isoformat(),
+    )
+
+
+def local_ip_towards(host: str):
+    """Address of this machine on the route to host (the node's --extudpip)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect((host, 1))  # UDP connect only selects a route, sends nothing
+        return sock.getsockname()[0]
+    except (OSError, UnicodeError):
+        return None
+    finally:
+        sock.close()
+
+
+@app.route("/udp")
+@requires_auth
+def udp_monitor():
+    cfg = common.load_config()
+    now = time.time()
+    direction = request.args.get("direction", "")
+    if direction not in {"rx", "tx"}:
+        direction = ""
+    packets = common.get_udp_packets(limit=200, direction=direction or None)
+    for row in packets:
+        row["ts_label"] = datetime.fromtimestamp(row["ts"]).strftime("%Y-%m-%d %H:%M:%S")
+    gateway_hb = common.get_heartbeat("gateway")
+    listener_hb = common.get_heartbeat(gateway.UDP_LISTENER_HEARTBEAT)
+    return render_template(
+        "udp.html",
+        cfg=cfg, now=now, packets=packets, direction=direction,
+        udp=common.get_udp_activity(),
+        gateway_alive=gateway_hb is not None and now - gateway_hb < 30,
+        listener_alive=listener_hb is not None and now - listener_hb < 30,
+        local_ip=local_ip_towards(str(cfg.get("mesh_node_ip", ""))),
+    )
+
+
+@app.route("/stations")
+@requires_auth
+def stations():
+    start_day, end_day, since, until = parse_date_range(default_days=30)
     selected_station = request.args.get("station", "").strip().upper()
-    selected_channel = request.args.get("channel", "").strip().upper()
     summary = common.get_station_summary(since, until)
     history_count = common.count_station_history(since, until, selected_station)
     history = common.get_station_history(since, until, selected_station, limit=500)
-    heard_message_count = common.count_heard_rf_messages(since, until, selected_channel)
-    heard_messages = common.get_heard_rf_messages(since, until, selected_channel, limit=500)
 
     for row in summary:
         row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
         row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
     for row in history:
-        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
-    for row in heard_messages:
         row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
 
     return render_template(
@@ -227,10 +298,7 @@ def stations():
         summary=summary,
         history=history,
         history_count=history_count,
-        heard_messages=heard_messages,
-        heard_message_count=heard_message_count,
         selected_station=selected_station,
-        selected_channel=selected_channel,
         start_date=start_day.isoformat(),
         end_date=end_day.isoformat(),
     )

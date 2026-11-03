@@ -57,7 +57,15 @@ def update_udp_monitor(direction: str, peer: str = None, status: str = "ok",
         log.warning("Could not update UDP monitor: %s", exc)
 
 
-def send_udp_message(cfg: dict, dst: str, text: str) -> None:
+def log_udp_packet(direction: str, peer: str, data: bytes, status: str) -> None:
+    try:
+        common.record_udp_packet(direction, peer, data, status)
+    except sqlite3.Error as exc:
+        log.warning("Could not store UDP packet: %s", exc)
+
+
+def send_udp_message(cfg: dict, dst: str, text: str, source: str = None) -> None:
+    """Send one text to the node; with a source ('web', 'email') its delivery is tracked."""
     text = text[: cfg["max_mesh_payload"]]
     payload = {"type": "msg", "dst": dst, "msg": text}
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -67,9 +75,16 @@ def send_udp_message(cfg: dict, dst: str, text: str) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(data, (cfg["mesh_node_ip"], cfg["mesh_udp_port"]))
         update_udp_monitor("tx", peer, "odesláno")
+        log_udp_packet("tx", peer, data, "odesláno")
+        if source:
+            try:
+                common.record_outgoing_message(source, dst, text)
+            except sqlite3.Error as exc:
+                log.warning("Could not record outgoing message: %s", exc)
         log.info("Sent to mesh (dst=%s): %s", dst, text)
     except OSError as exc:
         update_udp_monitor("tx", peer, "chyba", str(exc), count_datagram=False)
+        log_udp_packet("tx", peer, data, f"chyba: {exc}")
         raise
     finally:
         if sock is not None:
@@ -101,14 +116,52 @@ def decode_udp_packet(data: bytes):
     return json.loads(text)
 
 
+UDP_LISTENER_HEARTBEAT = "udp-listener"
+UDP_BIND_RETRY_SECONDS = 10
+
+
+def bind_udp_listener():
+    """Bind the receive socket, retrying until it succeeds.
+
+    A failed bind (wrong listen_ip, port taken) used to kill the listener
+    thread silently while sending kept working; now it is logged, shown in
+    the web UI and retried with the current configuration.
+    """
+    failed = False
+    while True:
+        cfg = common.load_config()
+        address = (cfg["listen_ip"], int(cfg["mesh_udp_port"]))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(address)
+        except OSError as exc:
+            sock.close()
+            error = f"Nelze naslouchat na {address[0]}:{address[1]}: {exc}"
+            log.error("%s", error)
+            update_udp_monitor("rx", status="chyba", error=error, count_datagram=False)
+            failed = True
+            time.sleep(UDP_BIND_RETRY_SECONDS)
+            continue
+        sock.settimeout(2.0)
+        log.info("Listening for MeshCom UDP packets on %s:%d", *address)
+        if failed:
+            # Replace the bind error shown in the web UI.
+            update_udp_monitor("rx", status=f"naslouchá na {address[0]}:{address[1]}",
+                               count_datagram=False)
+        return sock
+
+
 def udp_listener():
-    cfg = common.load_config()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((cfg["listen_ip"], cfg["mesh_udp_port"]))
-    sock.settimeout(2.0)
-    log.info("Listening for MeshCom UDP packets on %s:%d", cfg["listen_ip"], cfg["mesh_udp_port"])
+    sock = bind_udp_listener()
+    last_heartbeat = 0.0
 
     while True:
+        if time.monotonic() - last_heartbeat >= 10:
+            try:
+                common.set_heartbeat(UDP_LISTENER_HEARTBEAT)
+            except sqlite3.Error as exc:
+                log.warning("Could not update UDP listener heartbeat: %s", exc)
+            last_heartbeat = time.monotonic()
         try:
             data, addr = sock.recvfrom(4096)
         except socket.timeout:
@@ -119,18 +172,35 @@ def udp_listener():
             continue
 
         peer = f"{addr[0]}:{addr[1]}"
+        log.debug("UDP rx from %s: %r", peer, data)
         update_udp_monitor("rx", peer, "přijato")
         cfg = common.load_config()  # pick up live config changes (group, smtp, etc.)
+
+        def finish(status: str, error: str = None) -> None:
+            update_udp_monitor("rx", peer, status, error, count_datagram=False)
+            log_udp_packet("rx", peer, data, status)
 
         try:
             packet = decode_udp_packet(data)
         except json.JSONDecodeError:
-            update_udp_monitor("rx", peer, "neplatný JSON", "Datagram neobsahuje platný JSON.", count_datagram=False)
+            finish("neplatný JSON", "Datagram neobsahuje platný JSON.")
             continue
 
         if not isinstance(packet, dict):
-            update_udp_monitor("rx", peer, "neplatná struktura", "JSON paket není objekt.", count_datagram=False)
+            finish("neplatná struktura", "JSON paket není objekt.")
             continue
+
+        if packet.get("type") in {"ack", "msg"}:
+            try:
+                delivery = common.track_delivery(packet, cfg.get("callsign", ""))
+            except sqlite3.Error as exc:
+                log.warning("Could not update delivery status: %s", exc)
+                delivery = None
+            if delivery:
+                log.info("Delivery status of msg_id %s: %s", packet.get("msg_id"), delivery)
+            if packet.get("type") == "ack":
+                finish(f"potvrzení: {common.delivery_label(delivery)}" if delivery else "potvrzení cizí zprávy")
+                continue
 
         recorded_station = False
         try:
@@ -138,29 +208,30 @@ def udp_listener():
         except sqlite3.Error as exc:
             log.warning("Could not record RF station observation: %s", exc)
 
-        recorded_rf_message = False
-        if packet.get("type") == "msg":
-            try:
-                recorded_rf_message = common.record_other_rf_message(
-                    packet, cfg.get("callsign", ""), cfg.get("mesh_group", "")
-                )
-            except sqlite3.Error as exc:
-                log.warning("Could not record other RF message: %s", exc)
-
         if packet.get("type") != "msg":
-            status = "RF pozorování" if recorded_station else "ignorován jiný typ"
-            update_udp_monitor("rx", peer, status, count_datagram=False)
+            finish("RF pozorování" if recorded_station else "ignorován jiný typ")
             continue
 
-        dst = str(packet.get("dst", ""))
-        if dst != str(cfg["mesh_group"]):
-            status = "zachycena jiná RF skupina" if recorded_rf_message else "ignorována jiná skupina"
-            update_udp_monitor("rx", peer, status, count_datagram=False)
+        try:
+            new_message = common.record_rf_message(packet, cfg.get("callsign", ""))
+        except sqlite3.Error as exc:
+            log.warning("Could not record mesh message: %s", exc)
+            new_message = True  # still forward; duplicates are better than losses
+        if not new_message:
+            finish("duplikát, potvrzení nebo echo")
             continue
 
-        update_udp_monitor("rx", peer, "MeshCom zpráva", count_datagram=False)
-        src = packet.get("src", "unknown")
-        text = packet.get("msg", "")
+        src = str(packet.get("src", "unknown"))
+        dst = str(packet.get("dst", "")).split(",")[-1].strip().upper()
+        if src.split(",")[0].strip().upper() == str(cfg.get("callsign", "")).strip().upper():
+            finish("vlastní zpráva (echo uzlu)")
+            continue
+        if dst != str(cfg["mesh_group"]).strip().upper():
+            finish(f"zpráva pro {dst}")
+            continue
+
+        finish("MeshCom zpráva → e-mail")
+        text = common.clean_message_text(str(packet.get("msg", "")))
         log.info("Mesh message from %s in group %s: %s", src, dst, text)
 
         subject = f"[MeshCom {dst}] {src}"
@@ -219,6 +290,19 @@ def parse_email_file(path: str):
     return sender, subject, (body or "").strip(), attachments
 
 
+# "GROUP: 262" anywhere in the subject picks the target group, e.g. "Re: GROUP: 262 Test".
+_SUBJECT_GROUP = re.compile(r"\bGROUP\s*:\s*#?(\d{1,5})\b\s*[-:]?\s*", re.IGNORECASE)
+
+
+def email_destination(subject: str, default_group: str) -> tuple[str, str]:
+    """Target group from the subject and the subject without the GROUP tag."""
+    match = _SUBJECT_GROUP.search(subject or "")
+    if not match:
+        return str(default_group), subject
+    rest = (subject[: match.start()] + subject[match.end():]).strip()
+    return match.group(1), re.sub(r"^(?:(?:re|fwd?|aw|wg)\s*:\s*)+$", "", rest, flags=re.IGNORECASE).strip()
+
+
 def build_mesh_messages(sender: str, subject: str, body: str, attachments: list[str], max_len: int) -> list[str]:
     short_sender = re.sub(r"<.*?>", "", sender).strip() or "unknown"
     body = re.sub(r"\s+", " ", (body or "").strip())
@@ -238,8 +322,14 @@ def build_mesh_messages(sender: str, subject: str, body: str, attachments: list[
     if not body:
         body = "(bez textu)"
 
-    first_prefix = f"{short_sender}: {subject}{attachment_summary} - "
-    continuation_prefix = f"{short_sender}: {subject} (pokračování) - "
+    if subject or attachment_summary:
+        first_prefix = f"{short_sender}: {subject}{attachment_summary} - "
+    else:
+        first_prefix = f"{short_sender}: "
+    if subject:
+        continuation_prefix = f"{short_sender}: {subject} (pokračování) - "
+    else:
+        continuation_prefix = f"{short_sender} (pokračování): "
 
     def truncate_prefix(prefix: str) -> str:
         if len(prefix) <= max_len:
@@ -363,11 +453,12 @@ def poll_maildir():
                 log.error("Failed to parse email %s: %s", fpath, e)
                 continue
 
-            messages = build_mesh_messages(sender, subject, body, attachments, cfg["max_mesh_payload"])
+            group, mesh_subject = email_destination(subject, cfg["mesh_group"])
+            messages = build_mesh_messages(sender, mesh_subject, body, attachments, cfg["max_mesh_payload"])
             all_ok = True
             for text in messages:
                 try:
-                    send_udp_message(cfg, cfg["mesh_group"], text)
+                    send_udp_message(cfg, group, text, source="email")
                     common.log_message("email_to_mesh", sender, subject, text, status="ok")
                 except Exception as e:
                     all_ok = False

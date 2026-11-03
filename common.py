@@ -8,6 +8,7 @@ this module so they always see the same configuration and message log.
 import json
 import math
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -20,6 +21,8 @@ HOME_DIR = os.path.expanduser("~")
 WINE_PREFIX = os.path.join(HOME_DIR, ".wine")
 
 _config_lock = threading.Lock()
+UDP_PACKET_LOG_LIMIT = 300
+UDP_PACKET_PAYLOAD_LIMIT = 2000
 _ENV_PREFIX = "MESHCOM_"
 
 DEFAULT_CONFIG = {
@@ -259,6 +262,38 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS outgoing_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                source TEXT NOT NULL,         -- 'web' or 'email'
+                dst TEXT NOT NULL,
+                body TEXT NOT NULL,
+                msg_id TEXT,                  -- assigned by the node, learned from its echo
+                seq TEXT,                     -- {NNN} of direct messages, used by text ACKs
+                status TEXT NOT NULL,
+                status_at REAL NOT NULL,
+                ack_from TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_outgoing_messages_msg_id ON outgoing_messages(msg_id)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS udp_packets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                direction TEXT NOT NULL,      -- 'rx' or 'tx'
+                peer TEXT,
+                size INTEGER NOT NULL,
+                status TEXT,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS station_observations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 observed_at REAL NOT NULL,
@@ -312,10 +347,14 @@ def init_db() -> None:
                 rssi INTEGER,
                 snr INTEGER,
                 firmware TEXT,
-                fw_sub TEXT
+                fw_sub TEXT,
+                src_type TEXT NOT NULL DEFAULT 'lora'
             )
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(heard_rf_messages)")}
+        if "src_type" not in columns:
+            conn.execute("ALTER TABLE heard_rf_messages ADD COLUMN src_type TEXT NOT NULL DEFAULT 'lora'")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_heard_rf_messages_time "
             "ON heard_rf_messages(observed_at DESC)"
@@ -425,6 +464,40 @@ def get_udp_activity() -> dict:
         conn.close()
 
 
+def record_udp_packet(direction: str, peer: str, data: bytes, status: str = None) -> None:
+    """Keep the raw datagram for the UDP monitor (only the newest are retained)."""
+    if direction not in {"rx", "tx"}:
+        raise ValueError("direction must be 'rx' or 'tx'")
+    payload = data.decode("utf-8", errors="replace")[:UDP_PACKET_PAYLOAD_LIMIT]
+    conn = get_db()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO udp_packets (ts, direction, peer, size, status, payload) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (time.time(), direction, peer, len(data), status, payload),
+        )
+        conn.execute("DELETE FROM udp_packets WHERE id <= ?",
+                     (cursor.lastrowid - UDP_PACKET_LOG_LIMIT,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_udp_packets(limit: int = 100, direction: str = None) -> list[dict]:
+    query = "SELECT * FROM udp_packets"
+    params = []
+    if direction in {"rx", "tx"}:
+        query += " WHERE direction = ?"
+        params.append(direction)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(max(1, min(int(limit), UDP_PACKET_LOG_LIMIT)))
+    conn = get_db()
+    try:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
 def _station_number(packet: dict, key: str, integer: bool = False):
     value = packet.get(key)
     if value is None or isinstance(value, bool):
@@ -518,16 +591,51 @@ def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
         conn.close()
 
 
-def record_other_rf_message(packet: dict, own_callsign: str = "",
-                            configured_group: str = "") -> bool:
+# Trailing "{034" is the node's per-message sequence number, not text.
+_SEQUENCE_SUFFIX = re.compile(r"\{\d{3}\}?$")
+# Delivery receipts: "ack034", "OK1ABC-1:ack034", "OK1ABC-1 :rej034".
+_ACK_TEXT = re.compile(r"^(?:\S+\s*:)?(?:ack|rej)\d+$", re.IGNORECASE)
+RF_MESSAGE_DUPLICATE_WINDOW = 24 * 3600
+
+
+def clean_message_text(text: str) -> str:
+    return _SEQUENCE_SUFFIX.sub("", text.strip()).strip()
+
+
+def channel_kind(channel: str) -> str:
+    """'broadcast' for *, 'group' for a numeric group, otherwise 'direct'."""
+    if channel == "*":
+        return "broadcast"
+    return "group" if channel.isdigit() else "direct"
+
+
+def _normalized_msg_id(value) -> str | None:
+    msg_id = str(value or "").strip().upper()[:32]
+    if not msg_id:
+        return None
+    try:
+        # Firmware retries of the same message count the attempt in bits 10-11.
+        return f"{int(msg_id, 16) & ~0xC00:08X}"
+    except ValueError:
+        return msg_id
+
+
+def record_rf_message(packet: dict, own_callsign: str = "") -> bool:
+    """Store a mesh text message for the per-group view; False if skipped.
+
+    Stores messages heard over LoRa or via the internet gateway (src_type
+    "udp") and the node's echo of our own messages.
+    Duplicates (the node reports retries with the same msg_id), delivery
+    receipts and {CET} time beacons are skipped.
+    """
     body = packet.get("msg")
     destination_path = packet.get("dst")
     source_path = packet.get("src")
+    src_type = packet.get("src_type") or "lora"
     if (
-        packet.get("src_type") != "lora"
-        or packet.get("type") != "msg"
+        packet.get("type") != "msg"
+        or src_type not in {"lora", "node", "udp"}
         or not isinstance(body, str)
-        or not body.strip()
         or not isinstance(destination_path, str)
         or not isinstance(source_path, str)
     ):
@@ -535,30 +643,52 @@ def record_other_rf_message(packet: dict, own_callsign: str = "",
 
     source_parts = [part.strip().upper() for part in source_path.split(",") if part.strip()]
     destination_parts = [part.strip().upper() for part in destination_path.split(",") if part.strip()]
-    if not source_parts or not destination_parts:
+    body = clean_message_text(body)
+    if not source_parts or not destination_parts or not body:
+        return False
+    if _ACK_TEXT.match(body) or body.startswith("{CET}"):
         return False
 
     station = source_parts[0]
-    configured_group = str(configured_group or "").strip().upper()
-    channel = destination_parts[-1]
-    if station == str(own_callsign or "").strip().upper() or channel == configured_group:
+    own_callsign = str(own_callsign or "").strip().upper()
+    # src_type "node" repeats frames the node relays; only its echo of our
+    # own messages is new information.
+    if src_type == "node" and station != own_callsign:
         return False
 
-    observation = {
-        "observed_at": time.time(),
-        "station": station,
-        "source_path": ",".join(source_parts),
-        "destination_path": ",".join(destination_parts),
-        "channel": channel,
-        "body": body[:2048],
-        "msg_id": str(packet.get("msg_id", ""))[:32] or None,
-        "rssi": _station_number(packet, "rssi", integer=True),
-        "snr": _station_number(packet, "snr", integer=True),
-        "firmware": str(packet["firmware"])[:32] if packet.get("firmware") is not None else None,
-        "fw_sub": str(packet["fw_sub"])[:8] if packet.get("fw_sub") is not None else None,
-    }
+    now = time.time()
+    msg_id = _normalized_msg_id(packet.get("msg_id"))
+    channel = destination_parts[-1]
     conn = get_db()
     try:
+        if msg_id:
+            duplicate = conn.execute(
+                "SELECT 1 FROM heard_rf_messages WHERE station = ? AND msg_id = ? AND observed_at >= ?",
+                (station, msg_id, now - RF_MESSAGE_DUPLICATE_WINDOW),
+            ).fetchone()
+        else:
+            duplicate = conn.execute(
+                "SELECT 1 FROM heard_rf_messages WHERE station = ? AND channel = ? AND body = ? "
+                "AND observed_at >= ?",
+                (station, channel, body[:2048], now - 60),
+            ).fetchone()
+        if duplicate:
+            return False
+
+        observation = {
+            "observed_at": now,
+            "station": station,
+            "source_path": ",".join(source_parts),
+            "destination_path": ",".join(destination_parts),
+            "channel": channel,
+            "body": body[:2048],
+            "msg_id": msg_id,
+            "rssi": _station_number(packet, "rssi", integer=True) if src_type == "lora" else None,
+            "snr": _station_number(packet, "snr", integer=True) if src_type == "lora" else None,
+            "firmware": str(packet["firmware"])[:32] if packet.get("firmware") is not None else None,
+            "fw_sub": str(packet["fw_sub"])[:8] if packet.get("fw_sub") is not None else None,
+            "src_type": src_type,
+        }
         columns = ", ".join(observation)
         placeholders = ", ".join(f":{column}" for column in observation)
         conn.execute(
@@ -571,17 +701,184 @@ def record_other_rf_message(packet: dict, own_callsign: str = "",
         conn.close()
 
 
-def get_heard_rf_messages(since: float, until: float, channel: str = "",
-                          limit: int = 500) -> list[dict]:
-    query = (
-        "SELECT * FROM heard_rf_messages "
-        "WHERE observed_at >= ? AND observed_at < ?"
+# Delivery states of our own messages, in rising order of certainty. The
+# node's JSON ack (firmware 4.40a) uses status 0 heard, 1 gateway, 2 ACK,
+# 3 failed, 4 held by a store-and-forward mailbox.
+DELIVERY_STATES = {
+    "sent": (0, "předáno uzlu"),
+    "echo": (1, "uzel vysílá"),
+    "heard": (2, "slyšel soused"),
+    "held": (3, "drží schránka"),
+    "failed": (4, "nedoručeno"),
+    "gateway": (5, "doručeno přes bránu"),
+    "delivered": (5, "potvrzeno příjemcem"),
+}
+_ACK_STATUS_CODES = {0: "heard", 1: "gateway", 2: "delivered", 3: "failed", 4: "held"}
+_SEQUENCE_NUMBER = re.compile(r"\{(\d{3})\}?$")
+_ACK_PARTS = re.compile(r"^(?:(\S+?)\s*:)?(ack|rej)(\d+)$", re.IGNORECASE)
+OUTGOING_ECHO_WINDOW = 600
+
+
+def delivery_label(status: str) -> str:
+    return DELIVERY_STATES.get(status, (0, status))[1]
+
+
+def record_outgoing_message(source: str, dst: str, body: str) -> int:
+    now = time.time()
+    conn = get_db()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO outgoing_messages (created_at, source, dst, body, status, status_at) "
+            "VALUES (?, ?, ?, ?, 'sent', ?)",
+            (now, source, str(dst).strip().upper(), body, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def _raise_delivery_status(conn, row_id: int, status: str, ack_from: str = None) -> bool:
+    row = conn.execute("SELECT status FROM outgoing_messages WHERE id = ?", (row_id,)).fetchone()
+    if row is None or DELIVERY_STATES[status][0] <= DELIVERY_STATES.get(row["status"], (0,))[0]:
+        return False
+    conn.execute(
+        "UPDATE outgoing_messages SET status = ?, status_at = ?, ack_from = COALESCE(?, ack_from) "
+        "WHERE id = ?",
+        (status, time.time(), ack_from, row_id),
     )
+    return True
+
+
+def track_delivery(packet: dict, own_callsign: str = "") -> str | None:
+    """Update our sent messages from a node echo or an ACK; returns the new state.
+
+    1. The node echoes every message it sends for us (src_type "node",
+       src = own callsign); the echo carries the msg_id that later ACKs use.
+    2. A relay heard repeating it (src_type "lora", src = own callsign).
+    3. Firmware 4.40a: {"type":"ack","msg_id":..,"status":0-4,"from":..}.
+    4. Older firmware: a text ACK "ack034" / "OK2ZAW-10:ack034" to us.
+    """
+    own_callsign = str(own_callsign or "").strip().upper()
+    msg_id = _normalized_msg_id(packet.get("msg_id"))
+    conn = get_db()
+    try:
+        status = None
+        if packet.get("type") == "ack":
+            code = packet.get("status")
+            status = _ACK_STATUS_CODES.get(code) if isinstance(code, int) else None
+            if not status or not msg_id:
+                return None
+            row = conn.execute("SELECT id FROM outgoing_messages WHERE msg_id = ? ORDER BY id DESC",
+                               (msg_id,)).fetchone()
+            sender = str(packet.get("from") or "").strip().upper() or None
+            changed = row is not None and _raise_delivery_status(conn, row["id"], status, sender)
+        elif packet.get("type") == "msg" and isinstance(packet.get("msg"), str):
+            source = str(packet.get("src", "")).split(",")[0].strip().upper()
+            destination = str(packet.get("dst", "")).split(",")[-1].strip().upper()
+            text = packet["msg"].strip()
+            ack = _ACK_PARTS.match(text)
+            if ack and source != own_callsign:
+                target = (ack.group(1) or destination).strip().upper()
+                if target != own_callsign:
+                    return None
+                status = "failed" if ack.group(2).lower() == "rej" else "delivered"
+                row = conn.execute(
+                    "SELECT id FROM outgoing_messages WHERE seq = ? AND dst = ? AND created_at >= ? "
+                    "ORDER BY id DESC",
+                    (f"{int(ack.group(3)) % 1000:03d}", source, time.time() - 86400),
+                ).fetchone()
+                changed = row is not None and _raise_delivery_status(conn, row["id"], status, source)
+            elif source == own_callsign and packet.get("src_type") == "node":
+                row = conn.execute(
+                    "SELECT id FROM outgoing_messages WHERE msg_id IS NULL AND dst = ? AND body = ? "
+                    "AND created_at >= ? ORDER BY id DESC",
+                    (destination, clean_message_text(text), time.time() - OUTGOING_ECHO_WINDOW),
+                ).fetchone()
+                if row is None:
+                    return None
+                sequence = _SEQUENCE_NUMBER.search(text)
+                conn.execute("UPDATE outgoing_messages SET msg_id = ?, seq = ? WHERE id = ?",
+                             (msg_id, sequence.group(1) if sequence else None, row["id"]))
+                status = "echo"
+                changed = _raise_delivery_status(conn, row["id"], status) or True
+            elif source == own_callsign and msg_id:
+                status = "heard"
+                row = conn.execute("SELECT id FROM outgoing_messages WHERE msg_id = ? ORDER BY id DESC",
+                                   (msg_id,)).fetchone()
+                changed = row is not None and _raise_delivery_status(conn, row["id"], status)
+            else:
+                return None
+        else:
+            return None
+        conn.commit()
+        return status if changed else None
+    finally:
+        conn.close()
+
+
+def get_outgoing_messages(limit: int = 25) -> list[dict]:
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM outgoing_messages ORDER BY id DESC LIMIT ?",
+                            (max(1, min(int(limit), 500)),)).fetchall()
+    finally:
+        conn.close()
+    return [dict(row, status_label=delivery_label(row["status"])) for row in rows]
+
+
+def get_delivery_by_msg_id(msg_ids: list[str]) -> dict:
+    ids = [msg_id for msg_id in set(msg_ids) if msg_id]
+    if not ids:
+        return {}
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            f"SELECT msg_id, status, ack_from FROM outgoing_messages WHERE msg_id IN ({','.join('?' * len(ids))})",
+            ids,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row["msg_id"]: dict(row, status_label=delivery_label(row["status"])) for row in rows}
+
+
+def _rf_message_filter(since: float, until: float, channel: str, kind: str) -> tuple[str, list]:
+    where = "observed_at >= ? AND observed_at < ?"
     params = [since, until]
     if channel:
-        query += " AND channel = ?"
+        where += " AND channel = ?"
         params.append(channel.strip().upper())
-    query += " ORDER BY observed_at DESC, id DESC LIMIT ?"
+    elif kind == "direct":
+        where += " AND channel <> '*' AND channel GLOB '*[^0-9]*'"
+    elif kind == "group":
+        where += " AND channel NOT GLOB '*[^0-9]*' AND channel <> ''"
+    return where, params
+
+
+def get_rf_channel_summary(since: float, until: float) -> list[dict]:
+    """Message count and last activity per destination (group, * or callsign)."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT channel, COUNT(*) AS messages, MAX(observed_at) AS last_at "
+            "FROM heard_rf_messages WHERE observed_at >= ? AND observed_at < ? "
+            "GROUP BY channel ORDER BY last_at DESC",
+            (since, until),
+        ).fetchall()
+    finally:
+        conn.close()
+    result = [dict(row, kind=channel_kind(row["channel"])) for row in rows]
+    order = {"broadcast": 0, "group": 1, "direct": 2}
+    result.sort(key=lambda row: (order[row["kind"]],
+                                 int(row["channel"]) if row["kind"] == "group" else 0,
+                                 row["channel"]))
+    return result
+
+
+def get_heard_rf_messages(since: float, until: float, channel: str = "",
+                          limit: int = 500, kind: str = "") -> list[dict]:
+    where, params = _rf_message_filter(since, until, channel, kind)
+    query = f"SELECT * FROM heard_rf_messages WHERE {where} ORDER BY observed_at DESC, id DESC LIMIT ?"
     params.append(max(1, min(limit, 1000)))
 
     conn = get_db()
@@ -592,12 +889,9 @@ def get_heard_rf_messages(since: float, until: float, channel: str = "",
         conn.close()
 
 
-def count_heard_rf_messages(since: float, until: float, channel: str = "") -> int:
-    query = "SELECT COUNT(*) FROM heard_rf_messages WHERE observed_at >= ? AND observed_at < ?"
-    params = [since, until]
-    if channel:
-        query += " AND channel = ?"
-        params.append(channel.strip().upper())
+def count_heard_rf_messages(since: float, until: float, channel: str = "", kind: str = "") -> int:
+    where, params = _rf_message_filter(since, until, channel, kind)
+    query = f"SELECT COUNT(*) FROM heard_rf_messages WHERE {where}"
 
     conn = get_db()
     try:

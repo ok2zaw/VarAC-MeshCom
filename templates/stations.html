@@ -16,7 +16,7 @@
 {%- endmacro %}
 
 <h1>RF stanice</h1>
-<p class="monitor-note">Záznamy stanic obsahují pouze rámce přijaté přes LoRa; texty jsou ukládány jen v oddělené tabulce zpráv z jiných cílů. RSSI/SNR se vztahuje k přijatému RF hopu; jednotka výšky závisí na vysílajícím uzlu.</p>
+<p class="monitor-note">Záznamy stanic obsahují pouze rámce přijaté přes LoRa; textové zprávy najdete na stránce <a href="{{ url_for('mesh_messages') }}">Mesh zprávy</a>. RSSI/SNR se vztahuje k přijatému RF hopu; jednotka výšky závisí na vysílajícím uzlu.</p>
 
 <form method="get" class="station-filter">
   <label>Od
@@ -24,9 +24,6 @@
   </label>
   <label>Do
     <input type="date" name="end" value="{{ end_date }}" required>
-  </label>
-  <label>RF kanál / cíl
-    <input type="text" name="channel" value="{{ selected_channel }}" placeholder="všechny ostatní cíle">
   </label>
   {% if selected_station %}<input type="hidden" name="station" value="{{ selected_station }}">{% endif %}
   <button type="submit">Filtrovat</button>
@@ -45,7 +42,7 @@
     <tbody>
       {% for row in summary %}
       <tr>
-        <td><a href="{{ url_for('stations', start=start_date, end=end_date, station=row.station, channel=selected_channel) }}#station-history">{{ row.station }}</a></td>
+        <td><a href="{{ url_for('stations', start=start_date, end=end_date, station=row.station) }}#station-history">{{ row.station }}</a></td>
         <td title="{{ row.source_path }}">{{ row.heard_from }}</td>
         <td>{{ row.observations }}</td>
         <td>{{ row.first_seen_label }}</td>
@@ -67,7 +64,7 @@
   </table>
 </div>
 
-<h2 id="station-history">Historie{% if selected_station %}: {{ selected_station }} <a class="clear-filter" href="{{ url_for('stations', start=start_date, end=end_date, channel=selected_channel) }}">zobrazit všechny</a>{% endif %}</h2>
+<h2 id="station-history">Historie{% if selected_station %}: {{ selected_station }} <a class="clear-filter" href="{{ url_for('stations', start=start_date, end=end_date) }}">zobrazit všechny</a>{% endif %}</h2>
 <p class="card-sub">{{ history_count }} záznamů v období; zobrazeno nejvýše 500 nejnovějších.</p>
 <div class="table-wrap">
   <table class="msg-table station-table">
@@ -98,28 +95,4 @@
   </table>
 </div>
 
-<h2 id="heard-messages">Zprávy z dalších RF kanálů</h2>
-<p class="card-sub">{{ heard_message_count }} záznamů v období; zobrazeno nejvýše 500 nejnovějších. Texty zůstávají v lokální SQLite databázi bez automatického mazání. Zobrazují se jen zprávy zaslechnuté přes LoRa mimo hlavní MeshCom skupinu.</p>
-<div class="table-wrap">
-  <table class="msg-table rf-message-table">
-    <thead>
-      <tr><th>Čas</th><th>Kanál / cíl</th><th>Stanice</th><th>RF cesta</th><th>RSSI</th><th>SNR</th><th>Zpráva</th></tr>
-    </thead>
-    <tbody>
-      {% for row in heard_messages %}
-      <tr>
-        <td>{{ row.observed_at_label }}</td>
-        <td>{{ row.channel }}</td>
-        <td>{{ row.station }}</td>
-        <td title="{{ row.source_path }}">{{ row.source_path }}</td>
-        <td>{% if row.rssi is not none %}{{ row.rssi }} dBm{% else %}—{% endif %}</td>
-        <td>{% if row.snr is not none %}{{ row.snr }} dB{% else %}—{% endif %}</td>
-        <td>{{ row.body }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="7">V tomto období nejsou zachycené zprávy z jiných RF kanálů.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
 {% endblock %}
