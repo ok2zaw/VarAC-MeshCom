@@ -106,6 +106,10 @@ Upravte soubor `config.json`:
   "smtp_use_tls": true,
   "mail_from": "meshcom-gateway@example.com",
   "mail_to": "you@example.com",
+  "mesh_email_forward": false,
+  "mesh_email_addresses": false,
+  "mesh_email_all_domains": false,
+  "mesh_email_domains": "",
   "maildir_new": "/home/ok2zaw/Maildir/new",
   "maildir_cur": "/home/ok2zaw/Maildir/cur",
   "imap_host": "imap.example.com",
@@ -131,6 +135,7 @@ Důležité:
 - `maildir_new` a `maildir_cur` musí být přístupné pro uživatele, který spouští gateway
 - `imap_*` nastavení je pro externí IMAP frontu; pokud je prázdné, gateway pracuje jen s lokálním Maildir
 - `max_mesh_payload` je délka jedné MeshCom zprávy v bajtech UTF-8 (nejvýše 150, víc firmware uzlu nepřijme); `max_email_parts` omezuje, na kolik zpráv se jeden e-mail rozdělí (zbytek se zahodí a poslední část končí `[zkráceno]`), `email_part_delay_seconds` je pauza mezi částmi
+- `mesh_email_forward` zapíná přeposílání zpráv `EMAIL: ALIAS text` / `EMAIL: adresa text` ze skupiny `mesh_group` místo na `mail_to`; `mesh_email_addresses` povolí kromě aliasů i přímé adresy, a to do domén z `mesh_email_domains` (oddělené čárkou), nebo do všech, je-li zapnuté `mesh_email_all_domains`. Aliasy se zadávají na stránce **Nastavení** (ukládají se do `gateway.db`), viz README
 
 ## 6. Spuštění gateway
 
@@ -286,6 +291,31 @@ sudo chmod 600 /etc/postfix/sasl_passwd.db
 sudo systemctl restart postfix
 ```
 
+Ověřte, že Postfix poštu opravdu předává na relay – obě hodnoty musí být
+`smtp`, ne `error`:
+
+```bash
+postconf default_transport relay_transport
+```
+
+Pokud vypíší `error` (Postfix byl nainstalován nebo přenastaven jako
+*Local only*), odmítá veškerou poštu mimo Raspberry. Gateway pak hlásí
+`550 5.1.1 <adresa>: Recipient address rejected: [smtp.example.net]:587` – za
+`rejected:` je místo důvodu jen hodnota `relayhost`, nejde tedy o chybu
+přihlášení. Opravte to:
+
+```bash
+sudo postconf -e 'default_transport = smtp' 'relay_transport = smtp'
+sudo systemctl reload postfix
+echo test | mail -s "test relay" vas@example.net
+sudo tail -n 20 /var/log/mail.log
+```
+
+V logu má být `relay=smtp.example.net[…]:587 … status=sent`. Hláška
+`SASL authentication failed` znamená špatné údaje v `sasl_passwd` – řádek musí
+začínat přesně stejně jako `relayhost` a po každé změně je potřeba znovu
+spustit `sudo postmap /etc/postfix/sasl_passwd`.
+
 Heslo je pouze v chráněném souboru Postfixu, ne v `config.json`, `.env` ani
 Gitu. Tato varianta dovoluje odesílat přes relay programům na Raspberry; klient
 na PC zatím používá SMTP vlastní domény přímo. SMTP submission z VPN přes
@@ -301,7 +331,9 @@ přihlášenému účtu. Pro samotné přeposílání nejsou Dovecot ani getmail
 
 Při instalaci Postfixu zvolte v dialogu **Satellite system** (nebo *No
 configuration*) a jako *System mail name* ponechte hostname Raspberry; zbytek
-nastavíte příkazy z předchozí části. Pro test nainstalujte i příkaz `mail`:
+nastavíte příkazy z předchozí části. Nevolte *Local only* – ta nastaví
+`default_transport = error` a Postfix pak žádnou poštu ven nepošle (oprava viz
+kontrola v předchozí části). Pro test nainstalujte i příkaz `mail`:
 
 ```bash
 sudo apt install -y postfix libsasl2-modules bsd-mailx

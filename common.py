@@ -37,6 +37,10 @@ DEFAULT_CONFIG = {
     "smtp_use_tls": True,
     "mail_from": "meshcom-gateway@example.com",
     "mail_to": "you@example.com",
+    "mesh_email_forward": False,   # "EMAIL: alias|addr text" in mesh_group mails it instead of mail_to
+    "mesh_email_addresses": False, # also allow plain addresses, not only aliases
+    "mesh_email_all_domains": False,
+    "mesh_email_domains": "",      # comma-separated domains allowed for plain addresses
     "maildir_new": os.path.join(HOME_DIR, "Maildir", "new"),
     "maildir_cur": os.path.join(HOME_DIR, "Maildir", "cur"),
     "imap_host": "",
@@ -269,6 +273,15 @@ def init_db() -> None:
                 latitude REAL NOT NULL,
                 longitude REAL NOT NULL,
                 altitude REAL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_aliases (
+                alias TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
                 updated_at REAL NOT NULL
             )
             """
@@ -623,6 +636,47 @@ def set_manual_position(latitude: float, longitude: float) -> None:
             "longitude=excluded.longitude, updated_at=excluded.updated_at",
             (round(latitude, 6), round(longitude, 6), time.time()),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+EMAIL_ALIAS = re.compile(r"[A-Z0-9][A-Z0-9._/-]{0,31}")
+EMAIL_ADDRESS = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+
+
+def get_email_aliases() -> dict[str, str]:
+    """Aliases for "EMAIL: <alias>" mesh messages, uppercase alias -> address."""
+    conn = get_db()
+    try:
+        return {row["alias"]: row["email"] for row in conn.execute("SELECT alias, email FROM email_aliases ORDER BY alias")}
+    finally:
+        conn.close()
+
+
+def set_email_alias(alias: str, email: str) -> str:
+    alias, email = str(alias).strip().upper(), str(email).strip()
+    if not EMAIL_ALIAS.fullmatch(alias):
+        raise ValueError("Alias musí mít 1–32 znaků: písmena, číslice, tečka, pomlčka, podtržítko nebo lomítko.")
+    if not EMAIL_ADDRESS.fullmatch(email):
+        raise ValueError(f"Neplatná e-mailová adresa {email}.")
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO email_aliases (alias, email, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(alias) DO UPDATE SET email=excluded.email, updated_at=excluded.updated_at",
+            (alias, email, time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return alias
+
+
+def delete_email_alias(alias: str) -> None:
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM email_aliases WHERE alias = ?", (str(alias).strip().upper(),))
         conn.commit()
     finally:
         conn.close()

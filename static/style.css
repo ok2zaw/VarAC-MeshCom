@@ -408,6 +408,7 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 .config-form input[type="text"],
 .config-form input[type="number"],
 .config-form input[type="password"],
+.config-form input[type="email"],
 .config-form select {
   display: block;
   width: 100%;
@@ -424,7 +425,8 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 
 .config-form input::placeholder { color: var(--text-muted); }
 
-.config-form > button {
+.config-form > button,
+.alias-form fieldset > button {
   min-height: 32px;
   padding: 0.4rem 1rem;
   border: 1px solid var(--accent);
@@ -436,7 +438,13 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
   font-weight: 600;
 }
 
-.config-form > button:hover { background: var(--accent-hover); }
+.config-form > button:hover,
+.alias-form fieldset > button:hover { background: var(--accent-hover); }
+.config-form fieldset > p.hint { grid-column: 1 / -1; margin: 0.2rem 0 0; }
+.alias-form { margin-top: 0.8rem; }
+.alias-form fieldset > button { align-self: end; justify-self: start; margin-top: 0.55rem; }
+.alias-table { max-width: 640px; }
+.alias-note { color: var(--text-muted); font-size: 12px; }
 
 @media (max-width: 620px) {
   .topnav { gap: 0.35rem; padding: 0.65rem 14px; }

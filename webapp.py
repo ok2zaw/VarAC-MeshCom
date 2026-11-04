@@ -63,6 +63,9 @@ def require_csrf_token():
 app.jinja_env.globals["csrf_token"] = csrf_token
 
 
+MAIL_DOMAIN = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
+
+
 def validate_config_values(form_data, cfg):
     errors = {}
     numeric_fields = {
@@ -102,6 +105,12 @@ def validate_config_values(form_data, cfg):
             local_smtp = ipaddress.ip_address(smtp_host).is_loopback
         except ValueError:
             pass
+
+    for domain in str(form_data.get("mesh_email_domains", "")).split(","):
+        domain = domain.strip().lstrip("@")
+        if domain and not MAIL_DOMAIN.fullmatch(domain):
+            errors["mesh_email_domains"] = f"neplatná doména {domain}"
+            break
 
     if smtp_host and not smtp_user and not local_smtp:
         errors["smtp_user"] = "je potřeba pro SMTP server"
@@ -380,7 +389,7 @@ def config_page():
         for key in (
             "mesh_node_ip", "mesh_group", "smtp_host", "smtp_user",
             "mail_from", "mail_to", "maildir_new", "maildir_cur",
-            "imap_host", "imap_user", "imap_folder", "callsign", "web_username",
+            "imap_host", "imap_user", "imap_folder", "callsign", "web_username", "mesh_email_domains",
         ):
             new_cfg[key] = request.form.get(key, cfg.get(key, ""))
 
@@ -396,6 +405,10 @@ def config_page():
 
             new_cfg["smtp_use_tls"] = request.form.get("smtp_use_tls") == "on"
             new_cfg["imap_use_ssl"] = request.form.get("imap_use_ssl") == "on"
+            for key in ("mesh_email_forward", "mesh_email_addresses", "mesh_email_all_domains"):
+                new_cfg[key] = request.form.get(key) == "on"
+            new_cfg["mesh_email_domains"] = ", ".join(
+                d.strip().lower().lstrip("@") for d in new_cfg["mesh_email_domains"].split(",") if d.strip())
 
             # Only overwrite passwords if a new value was actually typed in,
             # so the form doesn't need to round-trip secrets in plaintext.
@@ -415,7 +428,26 @@ def config_page():
             cfg = new_cfg
             saved = True
 
-    return render_template("config.html", cfg=cfg, saved=saved, errors=errors)
+    return render_template("config.html", cfg=cfg, saved=saved, errors=errors,
+                           email_aliases=common.get_email_aliases())
+
+
+@app.route("/config/aliases", methods=["POST"])
+@requires_auth
+def email_aliases():
+    require_csrf_token()
+    alias = request.form.get("alias", "")
+    if request.form.get("action") == "delete":
+        common.delete_email_alias(alias)
+        flash(f"Alias {alias} smazán.", "success")
+    else:
+        try:
+            alias = common.set_email_alias(alias, request.form.get("email", ""))
+        except ValueError as exc:
+            flash(str(exc), "error")
+        else:
+            flash(f"Alias {alias} uložen.", "success")
+    return redirect(url_for("config_page", _anchor="email-aliases"))
 
 
 RADIO_TEXT_FIELDS = (

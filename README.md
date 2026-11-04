@@ -136,7 +136,55 @@ Group: 262
 <text zprávy bez pořadového čísla {NNN}>
 ```
 
-Odesílatel obsahuje i cestu přes převaděče, jak ji ohlásil uzel. Když
+Odesílatel obsahuje i cestu přes převaděče, jak ji ohlásil uzel.
+
+#### Přeposlání na zvolenou adresu (`EMAIL:`)
+
+Zpráva do skupiny `mesh_group`, která začíná `EMAIL:` a aliasem nebo
+e-mailovou adresou, se pošle na tuto adresu místo na `mail_to`:
+
+```
+MeshCom zpráva do skupiny 262:  EMAIL: OK2ABU Ahoj, zítra v 18:00.
+
+Komu:    ok2abu@example.net        (adresa aliasu OK2ABU)
+Předmět: [MeshCom 262] OK1AAA-1
+From: OK1AAA-1
+Group: 262
+
+Ahoj, zítra v 18:00.
+```
+
+Nastavuje se v **Nastavení** → *Přeposílání EMAIL:*:
+
+| Volba | Význam |
+| --- | --- |
+| *Přeposílat zprávy EMAIL:* | zapíná celou funkci (výchozí vypnuto) |
+| *Povolit i přímé e-mailové adresy* | vypnuto: jen aliasy; zapnuto: i `EMAIL: jan@example.net text` |
+| *Přímé adresy do všech domén* | přímé adresy do jakékoli domény |
+| *Povolené domény přímých adres* | jinak jen do těchto domén (např. `example.net, example.com`) |
+
+**Aliasy** se přidávají v tabulce pod formulářem nastavení: alias (např.
+volací značka `OK2ABU`) a e-mail. Zpráva `EMAIL: OK2ABU text` pak odejde na
+zadanou adresu. Uložením stejného aliasu se adresa změní. Aliasy platí vždy,
+i když jsou přímé adresy vypnuté nebo doména není mezi povolenými.
+
+- Funguje jen ve skupině nastavené jako `mesh_group`; v jiných skupinách se
+  zpráva nepřeposílá vůbec.
+- Na velikosti písmen nezáleží; přijímá se i `E-MAIL:` a mezera za dvojtečkou
+  není povinná. Prefix musí být na začátku zprávy.
+- Při neznámém aliasu, neplatné nebo nepovolené adrese či vypnuté volbě se
+  zpráva v plném znění (i s `EMAIL:`) pošle na `mail_to`. Důvod je v logu
+  gateway.
+- Na stránce **Zprávy** je u přeposlané zprávy v předmětu `→ adresa`.
+- E-mail odchází z adresy `mail_from`. Pokud tuto schránku gateway čte,
+  odpověď příjemce se vrátí do MeshCom skupiny jako každý jiný e-mail.
+
+> **Pozor:** Skupiny MeshCom jsou veřejné. Kdokoli ve skupině může přes
+> gateway poslat e-mail z vaší adresy `mail_from`. Nejbezpečnější jsou jen
+> aliasy; přímé adresy do všech domén otevírají cestu ke zneužití a ke
+> zhoršení pověsti domény.
+
+Když
 odpověď dorazí do schránky, kterou gateway čte, zpracuje se jako každý jiný
 e-mail. Předmět `Re: [MeshCom 262] …` nemá značku `GROUP`, takže odpověď jde do
 `mesh_group` a celý předmět se započítá do délky zprávy. Je proto lepší

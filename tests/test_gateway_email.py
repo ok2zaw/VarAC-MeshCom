@@ -140,6 +140,108 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(statuses, ["vlastní zpráva (echo uzlu)", "duplikát, potvrzení nebo echo",
                                     "MeshCom zpráva → e-mail"])
 
+    def test_mesh_email_command_selects_recipient(self):
+        cfg = {"mesh_email_forward": True, "mesh_email_addresses": True, "mesh_email_all_domains": True,
+               "mesh_email_domains": ""}
+        aliases = {"OK1AAA": "ok1aaa@example.net"}
+        resolve = lambda text, **over: gateway.mesh_email_recipient({**cfg, **over}, text, aliases)
+        self.assertEqual(resolve("EMAIL: jan@example.net Ahoj, zítra v 18:00"),
+                         ("jan@example.net", "Ahoj, zítra v 18:00", None))
+        self.assertEqual(resolve("e-mail:jan@example.net, test"), ("jan@example.net", "test", None))
+        self.assertEqual(resolve("EMAIL: jan@example.net"), ("jan@example.net", "(bez textu)", None))
+        self.assertEqual(resolve("Ahoj EMAIL: jan@example.net"), (None, "Ahoj EMAIL: jan@example.net", None))
+        self.assertEqual(resolve("EMAIL: jan@x text")[2], "neplatná adresa jan@x")
+        self.assertEqual(resolve("EMAIL: jan@example.net x", mesh_email_forward=False),
+                         (None, "EMAIL: jan@example.net x", None))
+
+        # Aliases work in every mode, case-insensitively; unknown ones fall back to mail_to.
+        self.assertEqual(resolve("EMAIL: ok1aaa Ahoj", mesh_email_addresses=False),
+                         ("ok1aaa@example.net", "Ahoj", None))
+        self.assertEqual(resolve("EMAIL: OK2BBB Ahoj"), (None, "EMAIL: OK2BBB Ahoj", "neznámý alias OK2BBB"))
+
+        only_aliases = resolve("EMAIL: jan@example.net x", mesh_email_addresses=False)
+        self.assertEqual(only_aliases[:2], (None, "EMAIL: jan@example.net x"))
+        self.assertIn("jen aliasy", only_aliases[2])
+
+        limited = {"mesh_email_all_domains": False, "mesh_email_domains": "example.net, @Example.com"}
+        self.assertEqual(resolve("EMAIL: Jan@EXAMPLE.com x", **limited)[0], "Jan@EXAMPLE.com")
+        address, text, refused = resolve("EMAIL: jan@example.org x", **limited)
+        self.assertIsNone(address)
+        self.assertEqual(text, "EMAIL: jan@example.org x")
+        self.assertIn("není povolena", refused)
+        self.assertIn("není povolena", resolve("EMAIL: jan@example.net x", mesh_email_all_domains=False)[2])
+
+    def test_email_aliases_are_stored_uppercase_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            self.assertEqual(common.set_email_alias(" ok2abu ", "ok2abu@example.net"), "OK2ABU")
+            common.set_email_alias("OK2ABU", "jan@example.net")
+            common.set_email_alias("OK1AAA-1", "ok1aaa@example.net")
+            for alias, email in (("", "a@example.net"), ("OK 1", "a@example.net"), ("OK1", "nope")):
+                with self.assertRaises(ValueError):
+                    common.set_email_alias(alias, email)
+            self.assertEqual(common.get_email_aliases(),
+                             {"OK1AAA-1": "ok1aaa@example.net", "OK2ABU": "jan@example.net"})
+            self.assertEqual(gateway.mesh_email_recipient({"mesh_email_forward": True}, "EMAIL: ok2abu Ahoj"),
+                             ("jan@example.net", "Ahoj", None))
+            common.delete_email_alias("ok2abu")
+            self.assertEqual(list(common.get_email_aliases()), ["OK1AAA-1"])
+
+    def test_web_manages_email_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")), \
+             patch.object(webapp.common, "load_config", return_value={**common.DEFAULT_CONFIG, "web_password": ""}):
+            common.init_db()
+            client = webapp.app.test_client()
+            with client.session_transaction() as session:
+                session["_csrf_token"] = "token"
+            response = client.post("/config/aliases", data={"csrf_token": "token", "alias": "ok2abu",
+                                                            "email": "ok2abu@example.net"})
+            self.assertEqual(response.status_code, 302)
+            self.assertTrue(response.headers["Location"].endswith("/config#email-aliases"))
+            client.post("/config/aliases", data={"csrf_token": "token", "alias": "bad alias", "email": "x@example.net"})
+            page = client.get("/config").get_data(as_text=True)
+            self.assertIn("<td>OK2ABU</td>", page)
+            self.assertIn("<td>ok2abu@example.net</td>", page)
+            self.assertIn("Alias musí mít", page)
+            client.post("/config/aliases", data={"csrf_token": "token", "action": "delete", "alias": "OK2ABU"})
+            self.assertEqual(common.get_email_aliases(), {})
+
+    def test_mesh_email_command_is_forwarded_only_in_own_group(self):
+        cfg = {"listen_ip": "127.0.0.1", "mesh_udp_port": 1799, "mesh_group": "12345",
+               "callsign": "OK9NODE-1", "mesh_email_forward": True, "mesh_email_addresses": True,
+               "mesh_email_all_domains": True, "mesh_email_domains": ""}
+        packet = {"src_type": "lora", "type": "msg", "src": "OK1AAA-1", "dst": "12345",
+                  "msg": "EMAIL: jan@example.net Ahoj Jane{013", "msg_id": "0000ABCD"}
+        datagrams = [
+            json.dumps(packet).encode(),
+            json.dumps({**packet, "dst": "262", "msg_id": "0000BBBB"}).encode(),
+        ]
+
+        class FakeSocket:
+            def recvfrom(self, size):
+                if datagrams:
+                    return datagrams.pop(0), ("192.168.1.50", 1799)
+                raise KeyboardInterrupt
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")), \
+             patch.object(gateway.common, "load_config", return_value=cfg), \
+             patch.object(gateway, "bind_udp_listener", return_value=FakeSocket()), \
+             patch.object(gateway, "send_email") as send_email, \
+             patch.object(gateway.common, "log_message") as log_message:
+            common.init_db()
+            with self.assertRaises(KeyboardInterrupt):
+                gateway.udp_listener()
+            statuses = [p["status"] for p in common.get_udp_packets()]
+
+        send_email.assert_called_once_with(cfg, "[MeshCom 12345] OK1AAA-1",
+                                           "From: OK1AAA-1\nGroup: 12345\n\nAhoj Jane", to="jan@example.net")
+        log_message.assert_called_once_with("mesh_to_email", "OK1AAA-1",
+                                            "[MeshCom 12345] OK1AAA-1 → jan@example.net", "Ahoj Jane", status="ok")
+        self.assertEqual(statuses, ["zpráva pro 262", "MeshCom zpráva → jan@example.net"])
+
     def test_delivery_is_tracked_from_node_echo_and_acks(self):
         own = "OK9NODE-1"
         with tempfile.TemporaryDirectory() as tmpdir, \
@@ -820,6 +922,11 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(set(errors), {"max_mesh_payload", "max_email_parts", "email_part_delay_seconds"})
         self.assertTrue(webapp.validate_config_values(
             {"max_mesh_payload": "150", "max_email_parts": "4", "email_part_delay_seconds": "5"}, {})["ok"])
+
+    def test_validate_config_checks_email_forward_domains(self):
+        self.assertTrue(webapp.validate_config_values({"mesh_email_domains": "example.net, @example.com"}, {})["ok"])
+        errors = webapp.validate_config_values({"mesh_email_domains": "example.net, bad domain"}, {})["errors"]
+        self.assertEqual(errors, {"mesh_email_domains": "neplatná doména bad domain"})
 
 
 if __name__ == "__main__":

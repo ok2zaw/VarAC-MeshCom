@@ -91,11 +91,11 @@ def send_udp_message(cfg: dict, dst: str, text: str, source: str = None) -> None
             sock.close()
 
 
-def send_email(cfg: dict, subject: str, body: str) -> None:
+def send_email(cfg: dict, subject: str, body: str, to: str = None) -> None:
     msg = MIMEText(body, _charset="utf-8")
     msg["Subject"] = subject
     msg["From"] = cfg["mail_from"]
-    msg["To"] = cfg["mail_to"]
+    msg["To"] = to or cfg["mail_to"]
 
     with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"], timeout=15) as server:
         if cfg["smtp_use_tls"]:
@@ -109,6 +109,37 @@ def send_email(cfg: dict, subject: str, body: str) -> None:
 # ---------------------------------------------------------------------
 # mesh -> email
 # ---------------------------------------------------------------------
+
+MESH_EMAIL_COMMAND = re.compile(r"\s*E-?MAIL\s*:\s*(\S+)\s*(.*)", re.IGNORECASE | re.DOTALL)
+
+
+def mesh_email_recipient(cfg: dict, text: str, aliases: dict = None) -> tuple[str | None, str, str | None]:
+    """Split "EMAIL: <alias|addr> text" into (addr, text, reason it was refused).
+
+    Without the EMAIL: prefix, or when forwarding is off, the text is returned
+    unchanged and goes to mail_to as usual. Plain addresses need
+    mesh_email_addresses and an allowed domain; aliases are always allowed.
+    """
+    match = MESH_EMAIL_COMMAND.match(text)
+    if not match or not cfg.get("mesh_email_forward"):
+        return None, text, None
+    target = match.group(1).rstrip(",;:")
+    body = match.group(2).strip() or "(bez textu)"
+    if "@" not in target:
+        if aliases is None:
+            aliases = common.get_email_aliases()
+        address = aliases.get(target.upper())
+        return (address, body, None) if address else (None, text, f"neznámý alias {target}")
+    if not cfg.get("mesh_email_addresses"):
+        return None, text, f"přímé adresy nejsou povoleny (jen aliasy): {target}"
+    if not common.EMAIL_ADDRESS.fullmatch(target):
+        return None, text, f"neplatná adresa {target}"
+    if not cfg.get("mesh_email_all_domains"):
+        domains = {d.strip().lower().lstrip("@") for d in str(cfg.get("mesh_email_domains", "")).split(",") if d.strip()}
+        if target.rsplit("@", 1)[1].lower() not in domains:
+            return None, text, f"doména adresy {target} není povolena"
+    return target, body, None
+
 
 def decode_udp_packet(data: bytes):
     # Firmware buffers may carry a trailing NUL terminator, CR/LF or a BOM.
@@ -237,18 +268,25 @@ def udp_listener():
             finish(f"zpráva pro {dst}")
             continue
 
-        finish("MeshCom zpráva → e-mail")
         text = common.clean_message_text(str(packet.get("msg", "")))
+        recipient, text, refused = mesh_email_recipient(cfg, text)
+        if refused:
+            log.warning("EMAIL: forward from %s refused (%s), sending to mail_to", src, refused)
+        finish(f"MeshCom zpráva → {recipient}" if recipient else "MeshCom zpráva → e-mail")
         log.info("Mesh message from %s in group %s: %s", src, dst, text)
 
         subject = f"[MeshCom {dst}] {src}"
         body = f"From: {src}\nGroup: {dst}\n\n{text}"
+        logged_subject = f"{subject} → {recipient}" if recipient else subject
         try:
-            send_email(cfg, subject, body)
-            common.log_message("mesh_to_email", src, subject, text, status="ok")
+            if recipient:
+                send_email(cfg, subject, body, to=recipient)
+            else:
+                send_email(cfg, subject, body)
+            common.log_message("mesh_to_email", src, logged_subject, text, status="ok")
         except Exception as e:
             log.error("Failed to send email for mesh message: %s", e)
-            common.log_message("mesh_to_email", src, subject, text, status="error", error=str(e))
+            common.log_message("mesh_to_email", src, logged_subject, text, status="error", error=str(e))
 
 
 # ---------------------------------------------------------------------
