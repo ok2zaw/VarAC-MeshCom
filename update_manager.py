@@ -17,7 +17,8 @@ EXPECTED_REMOTES = {
     "git@github.com:ok2zaw/VarAC-MeshCom.git",
 }
 VERSION_PATTERN = re.compile(r"^\d+\.\d+(?:\.\d+)?$")
-MANUAL_UPDATE_PATHS = ("requirements.txt", "systemd", "setup_rpi.sh", "scripts/meshcom-restart")
+MANUAL_UPDATE_PATHS = ("requirements.txt", "systemd", "setup_rpi.sh", "scripts/meshcom-restart",
+                       "scripts/meshcom-ntp", "polkit")
 _UPDATE_LOCK = threading.Lock()
 log = logging.getLogger("meshcom-updater")
 

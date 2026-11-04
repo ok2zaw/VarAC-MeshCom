@@ -426,7 +426,9 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 .config-form input::placeholder { color: var(--text-muted); }
 
 .config-form > button,
-.config-form .alias-add-button {
+.config-form .alias-add-button,
+.config-form .fieldset-button,
+.config-form .time-buttons button {
   min-height: 32px;
   padding: 0.4rem 1rem;
   border: 1px solid var(--accent);
@@ -439,7 +441,16 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 }
 
 .config-form > button:hover,
-.config-form .alias-add-button:hover { background: var(--accent-hover); }
+.config-form .alias-add-button:hover,
+.config-form .fieldset-button:hover { background: var(--accent-hover); }
+.config-form .fieldset-button { align-self: end; justify-self: start; margin-top: 0.55rem; }
+.config-form .row-button { grid-column: 1 / -1; margin-bottom: 0.4rem; }
+#system-time { margin-top: 1.5rem; }
+.config-form .time-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-self: end; margin-top: 0.55rem; }
+.config-form .time-buttons button.secondary { background: transparent; color: var(--accent-text); }
+.config-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.config-form input[type="datetime-local"] { display: block; width: 100%; height: 30px; margin-top: 4px; padding: 0 0.55rem;
+  border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font-size: 12px; }
 .config-form fieldset > p.hint { grid-column: 1 / -1; margin: 0.2rem 0 0; }
 .config-form .alias-block { grid-column: 1 / -1; margin-top: 0.8rem; }
 .config-form .alias-block h3 { margin: 0 0 0.3rem; color: var(--text-2); font-size: 12px; }

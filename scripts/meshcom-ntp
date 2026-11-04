@@ -1,0 +1,42 @@
+#!/bin/sh
+# Apply NTP servers requested by the MeshCom web UI (run as root by meshcom-ntp.path).
+set -euf
+
+REQUEST_FILE=/home/ok2zaw/meshcom-gateway/.meshcom-ntp-request
+DROPIN_DIR=/etc/systemd/timesyncd.conf.d
+DROPIN="$DROPIN_DIR/meshcom.conf"
+
+[ -e "$REQUEST_FILE" ] || exit 0
+if [ -L "$REQUEST_FILE" ] || [ ! -f "$REQUEST_FILE" ]; then
+    rm -f -- "$REQUEST_FILE"
+    echo "meshcom-ntp: request is not a regular file, ignored" >&2
+    exit 1
+fi
+servers=$(head -c 2048 -- "$REQUEST_FILE" | tr -s ' \t\r\n' '    ')
+rm -f -- "$REQUEST_FILE"
+
+count=0
+for server in $servers; do
+    case "$server" in
+        *[!A-Za-z0-9.:-]* | -* | .*)
+            echo "meshcom-ntp: invalid server name, ignored" >&2
+            exit 1 ;;
+    esac
+    count=$((count + 1))
+done
+if [ "$count" -gt 8 ]; then
+    echo "meshcom-ntp: too many servers, ignored" >&2
+    exit 1
+fi
+
+if [ "$count" -eq 0 ]; then
+    rm -f -- "$DROPIN"
+else
+    mkdir -p "$DROPIN_DIR"
+    # shellcheck disable=SC2086  # word splitting joins the validated names
+    printf '# Managed by the MeshCom gateway web UI\n[Time]\nNTP=%s\n' "$(echo $servers)" > "$DROPIN.tmp"
+    chmod 0644 "$DROPIN.tmp"
+    mv -f "$DROPIN.tmp" "$DROPIN"
+fi
+
+exec /usr/bin/systemctl restart systemd-timesyncd.service

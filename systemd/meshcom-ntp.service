@@ -1,0 +1,6 @@
+[Unit]
+Description=Apply NTP servers requested from the MeshCom web UI
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/meshcom-ntp

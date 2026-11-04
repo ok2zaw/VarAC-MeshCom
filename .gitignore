@@ -7,6 +7,8 @@ __pycache__/
 *.tmp
 .env
 .meshcom-restart-request
+.meshcom-ntp-request
+.meshcom-ntp-request.tmp
 venv/
 .venv/
 .idea/

@@ -38,6 +38,10 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	skupina z nastavení, lze ji ale přepsat jiným číslem (nabízí se skupiny
 	slyšené za posledních 30 dní). Délka se kontroluje v bajtech a pokus se
 	zaznamená do historie.
+- V **Nastavení** → *Čas Raspberry Pi* zvolit časové pásmo, zapnout či vypnout
+	NTP, zadat NTP servery a bez internetu nastavit čas ručně (i podle hodin
+	prohlížeče). Vyžaduje jednorázovou instalaci polkit pravidla a helperu
+	(INSTALL, kapitola 9.5).
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
 - Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
@@ -198,8 +202,8 @@ předmět zkrátit, případně doplnit `GROUP: <číslo>`.
 - kapitoly 2–7: gateway, konfigurace a systemd služby,
 - kapitola 8: volitelný lokální poštovní uzel (Postfix, Dovecot, getmail6),
 - kapitola 9: tipy pro provoz – napájení Raspberry Pi 5 a start bez tlačítka
-	(`PSU_MAX_CURRENT`), trvalé logy, diagnostika RF stanic a přehled síťových
-	portů včetně souběhu s Webminem,
+	(`PSU_MAX_CURRENT`), trvalé logy, diagnostika RF stanic, přehled síťových
+	portů včetně souběhu s Webminem a nastavení času a NTP z webu,
 - kapitola 11: VARA, Mercury (včetně webového GUI) a VarAC na Raspberry Pi,
 - kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix.
 
@@ -268,5 +272,6 @@ Postfix a Dovecot se aktualizují samostatně podle [INSTALL.md](INSTALL.md).
 - `gateway.py` – UDP, SMTP, Maildir a volitelné IMAP zpracování
 - `webapp.py` – Flask webové rozhraní a validace webového formuláře
 - `common.py` – konfigurace, SQLite, Maildir a heartbeat
+- `system_time.py` – časové pásmo, NTP a ruční čas přes `timedatectl`
 - `templates/`, `static/` – šablony a styly webu
 - `systemd/` – produkční jednotky pro gateway a web

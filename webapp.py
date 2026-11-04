@@ -37,6 +37,7 @@ import bpq_services
 import common
 import gateway
 import radio_apps
+import system_time
 import update_manager
 
 app = Flask(__name__)
@@ -429,7 +430,39 @@ def config_page():
             saved = True
 
     return render_template("config.html", cfg=cfg, saved=saved, errors=errors,
-                           email_aliases=common.get_email_aliases())
+                           email_aliases=common.get_email_aliases(),
+                           time_status=system_time.status(), timezones=system_time.timezones())
+
+
+@app.route("/config/time", methods=["POST"])
+@requires_auth
+def system_time_settings():
+    require_csrf_token()
+    done = []
+    try:
+        if request.form.get("action") == "set_time":
+            system_time.set_time(request.form.get("manual_time", ""))
+            flash("Čas Raspberry Pi nastaven.", "success")
+        else:
+            current = system_time.status()
+            zone = request.form.get("timezone", "").strip()
+            if zone and zone != current["timezone"]:
+                system_time.set_timezone(zone)
+                done.append(f"časové pásmo {zone}")
+            ntp = request.form.get("ntp") == "on"
+            if ntp != current["ntp"]:
+                system_time.set_ntp(ntp)
+                done.append("NTP zapnuto" if ntp else "NTP vypnuto")
+            servers = " ".join(system_time.parse_ntp_servers(request.form.get("ntp_servers", "")))
+            if servers != " ".join(current["servers"].split()):
+                system_time.request_ntp_servers(servers)
+                done.append(f"NTP servery {servers}" if servers else "výchozí NTP servery")
+            flash("Uloženo: " + ", ".join(done) + "." if done else "Beze změny.", "success")
+    except system_time.TimeError as exc:
+        if done:
+            flash("Uloženo: " + ", ".join(done) + ".", "success")
+        flash(f"Čas: {exc}", "error")
+    return redirect(url_for("config_page", _anchor="system-time"))
 
 
 @app.route("/config/aliases", methods=["POST"])

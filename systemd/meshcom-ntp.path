@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for NTP server changes requested from the MeshCom web UI
+
+[Path]
+PathExists=/home/ok2zaw/meshcom-gateway/.meshcom-ntp-request
+Unit=meshcom-ntp.service
+
+[Install]
+WantedBy=multi-user.target

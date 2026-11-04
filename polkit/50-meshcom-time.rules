@@ -1,0 +1,10 @@
+// Let the MeshCom web UI (service user ok2zaw) change the time zone, NTP and clock
+// through systemd-timedated. Nothing else is granted.
+polkit.addRule(function (action, subject) {
+    if (subject.user == "ok2zaw" &&
+        (action.id == "org.freedesktop.timedate1.set-timezone" ||
+         action.id == "org.freedesktop.timedate1.set-ntp" ||
+         action.id == "org.freedesktop.timedate1.set-time")) {
+        return polkit.Result.YES;
+    }
+});

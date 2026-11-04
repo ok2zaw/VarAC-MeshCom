@@ -748,6 +748,70 @@ sudo sed -i 's/^port=10000$/port=10010/; s/^listen=10000$/listen=10010/' /etc/we
 sudo systemctl restart webmin
 ```
 
+### 9.5 Čas, časové pásmo a NTP z webu
+
+V **Nastavení** → *Čas Raspberry Pi* je vidět aktuální čas, časové pásmo a stav
+synchronizace a dá se tam:
+
+- zvolit **časové pásmo** (např. `Europe/Prague`),
+- zapnout nebo vypnout **NTP**,
+- zadat vlastní **NTP servery** (např. `tik.cesnet.cz ntp.nic.cz`; prázdné pole
+  vrátí výchozí servery distribuce),
+- při vypnutém NTP **nastavit čas ručně**. Tlačítko *Čas z prohlížeče* doplní
+  čas z počítače, na kterém je web otevřený. To se hodí v terénu bez
+  internetu, protože Raspberry Pi bez baterie RTC po vypnutí čas ztratí.
+  Ruční čas se zadává v časovém pásmu Pi.
+
+Webová služba běží bez práv roota (`NoNewPrivileges=true`), proto potřebuje dvě
+jednorázově instalované části.
+
+**1. Polkit pravidlo** dovolí uživateli webu měnit přes `timedatectl` jen časové
+pásmo, NTP a čas, nic dalšího. Raspberry Pi OS Bookworm a novější mají polkit
+s pravidly v JavaScriptu (`pkaction --version` vypíše 121 nebo vyšší):
+
+```bash
+sudo install -o root -g root -m 0644 polkit/50-meshcom-time.rules /etc/polkit-1/rules.d/
+```
+
+Pokud služba neběží jako `ok2zaw`, upravte jméno uživatele v pravidle. Bez
+pravidla web hlásí `Interactive authentication required`.
+
+Starší systém se starým polkitem 0.105 (Bullseye) pravidla `.rules` nečte.
+Místo nich vytvořte soubor `/etc/polkit-1/localauthority/50-local.d/meshcom-time.pkla`:
+
+```ini
+[MeshCom time]
+Identity=unix-user:ok2zaw
+Action=org.freedesktop.timedate1.set-timezone;org.freedesktop.timedate1.set-ntp;org.freedesktop.timedate1.set-time
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+```
+
+**2. Helper pro NTP servery.** Servery jsou v souboru root
+`/etc/systemd/timesyncd.conf.d/meshcom.conf`. Web jen zapíše požadavek
+`.meshcom-ntp-request` do repozitáře. Rootem spouštěný helper z něj přijme jen
+názvy serverů a IP adresy (nejvýš 8), zapíše konfiguraci a restartuje
+`systemd-timesyncd`. Funguje to stejně jako restart po aktualizaci (kapitola 7).
+Pokud projekt není v `/home/ok2zaw/meshcom-gateway`, upravte cestu v
+`scripts/meshcom-ntp` (`REQUEST_FILE`) a v `systemd/meshcom-ntp.path`
+(`PathExists`). Pak:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/meshcom-ntp /usr/local/sbin/meshcom-ntp
+sudo cp systemd/meshcom-ntp.path systemd/meshcom-ntp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now meshcom-ntp.path
+```
+
+Bez helperu je pole NTP serverů ve webu neaktivní, ostatní volby fungují.
+Výsledek ověříte příkazy `timedatectl` a `timedatectl timesync-status`. Pole
+NTP serverů platí jen pro `systemd-timesyncd` (výchozí na Raspberry Pi OS).
+Pokud používáte `chrony`, servery nastavte v jeho konfiguraci.
+
+Změny polkit pravidla, helperu a jednotek web při aktualizaci neprovede, protože
+je instaluje root. Po `git pull` je případně zopakujte ručně.
+
 ## 10. Rozdíl mezi externím a lokálním mailserverem
 
 ### Externí SMTP/IMAP (doporučeno)

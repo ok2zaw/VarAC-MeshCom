@@ -167,6 +167,52 @@
   <button type="submit">Uložit</button>
 </form>
 
+<form method="post" action="{{ url_for('system_time_settings') }}" class="config-form" id="system-time">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <fieldset>
+    <legend>Čas Raspberry Pi</legend>
+    <p class="hint">
+      Teď: <strong>{{ time_status.now }}</strong>
+      {% if time_status.error %}– {{ time_status.error }}
+      {% else %}· NTP {{ 'zapnuto' if time_status.ntp else 'vypnuto' }},
+        {{ 'synchronizováno' if time_status.synchronized else 'nesynchronizováno' }}{% if time_status.server %} ({{ time_status.server }}){% endif %}
+      {% endif %}
+    </p>
+    <label>Časové pásmo
+      <select name="timezone">
+        {% for zone in timezones %}<option{{ ' selected' if zone == time_status.timezone }}>{{ zone }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>NTP servery <span class="hint">(mezerou nebo čárkou; prázdné = výchozí{% if time_status.fallback_servers %}: {{ time_status.fallback_servers }}{% endif %})</span>
+      <input type="text" name="ntp_servers" value="{{ time_status.servers }}" placeholder="tik.cesnet.cz ntp.nic.cz"
+             {{ 'disabled' if not time_status.helper_ready }}>
+      {% if not time_status.helper_ready %}<span class="hint">Změna serverů vyžaduje helper meshcom-ntp (INSTALL, kapitola 9.5).</span>{% endif %}
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="ntp" {{ 'checked' if time_status.ntp }}>
+      Synchronizovat čas přes NTP
+    </label>
+    <button type="submit" name="action" value="apply" class="fieldset-button row-button">Uložit čas</button>
+
+    <label>Ruční nastavení času <span class="hint">(jen při vypnutém NTP, v časovém pásmu Pi)</span>
+      <input type="datetime-local" name="manual_time" step="1" id="manual-time">
+    </label>
+    <div class="time-buttons">
+      <button type="button" class="secondary" id="manual-time-now">Čas z prohlížeče</button>
+      <button type="submit" name="action" value="set_time" class="fieldset-button"
+              {{ 'disabled title="Nejdřív vypněte NTP."'|safe if time_status.ntp }}>Nastavit čas</button>
+    </div>
+  </fieldset>
+</form>
+<script>
+  document.getElementById("manual-time-now").addEventListener("click", function () {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    document.getElementById("manual-time").value = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" +
+      pad(now.getDate()) + "T" + pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+  });
+</script>
+
 <form method="post" action="{{ url_for('email_aliases') }}" id="alias-add">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 </form>
