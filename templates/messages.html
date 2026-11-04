@@ -11,9 +11,9 @@
   <form method="post" action="{{ url_for('send_message') }}" class="send-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="mesh-message">Text zprávy</label>
-    <textarea id="mesh-message" name="message" rows="3" maxlength="{{ cfg.max_mesh_payload }}" required></textarea>
+    <textarea id="mesh-message" name="message" rows="3" maxlength="{{ max_length }}" required></textarea>
     <div class="send-form-footer">
-      <span class="hint">Maximum {{ cfg.max_mesh_payload }} znaků. Odesílá se přímo do skupiny.</span>
+      <span class="hint">Zbývá <span id="mesh-message-left">{{ max_length }}</span> z {{ max_length }} bajtů (písmena s diakritikou zabírají 2). Odesílá se přímo do skupiny.</span>
       <button type="submit">Odeslat do MeshCom</button>
     </div>
   </form>
@@ -69,4 +69,22 @@
   <span>strana {{ page }} / {{ total_pages }}</span>
   {% if page < total_pages %}<a href="?page={{ page + 1 }}">další →</a>{% endif %}
 </div>
+
+<script>
+(() => {
+  // The node limit counts UTF-8 bytes, maxlength only characters.
+  const field = document.getElementById("mesh-message");
+  const left = document.getElementById("mesh-message-left");
+  if (!field || !left) return;
+  const limit = {{ max_length|tojson }};
+  const encoder = new TextEncoder();
+  const update = () => {
+    const remaining = limit - encoder.encode(field.value).length;
+    left.textContent = remaining;
+    field.setCustomValidity(remaining < 0 ? `Zpráva je o ${-remaining} bajtů delší než limit.` : "");
+  };
+  field.addEventListener("input", update);
+  update();
+})();
+</script>
 {% endblock %}

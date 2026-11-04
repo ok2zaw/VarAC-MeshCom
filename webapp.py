@@ -69,7 +69,9 @@ def validate_config_values(form_data, cfg):
         "smtp_port": (1, 65535),
         "imap_port": (1, 65535),
         "poll_interval_seconds": (1, 86400),
-        "max_mesh_payload": (20, 250),
+        "max_mesh_payload": (20, gateway.MESHCOM_MAX_TEXT_BYTES),
+        "max_email_parts": (1, 20),
+        "email_part_delay_seconds": (0, 300),
     }
 
     for field, (minimum, maximum) in numeric_fields.items():
@@ -153,12 +155,13 @@ def send_message():
     cfg = common.load_config()
     group = str(cfg.get("mesh_group", "")).strip()
     message = request.form.get("message", "").strip()
-    max_length = int(cfg.get("max_mesh_payload", 150))
+    max_length = gateway.mesh_text_limit(cfg)
 
     if not message:
         flash("Zpráva nesmí být prázdná.", "error")
-    elif len(message) > max_length:
-        flash(f"Zpráva má {len(message)} znaků; limit pro MeshCom je {max_length}.", "error")
+    elif gateway.utf8_len(message) > max_length:
+        flash(f"Zpráva má {gateway.utf8_len(message)} bajtů; limit pro MeshCom je {max_length} "
+              "(písmena s diakritikou zabírají 2 bajty).", "error")
     elif not group:
         flash("Není nastavena cílová MeshCom skupina.", "error")
     else:
@@ -181,6 +184,7 @@ def send_message():
 @app.route("/messages")
 @requires_auth
 def messages():
+    cfg = common.load_config()
     page = max(int(request.args.get("page", 1)), 1)
     per_page = 25
     rows = common.get_recent_messages(limit=per_page, offset=(page - 1) * per_page)
@@ -192,7 +196,7 @@ def messages():
         row["status_label_time"] = datetime.fromtimestamp(row["status_at"]).strftime("%H:%M:%S")
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
-        cfg=common.load_config(), outgoing=outgoing,
+        cfg=cfg, outgoing=outgoing, max_length=gateway.mesh_text_limit(cfg),
     )
 
 
@@ -369,7 +373,8 @@ def config_page():
         errors = validation["errors"]
 
         if validation["ok"]:
-            for key in ("mesh_udp_port", "smtp_port", "imap_port", "poll_interval_seconds", "max_mesh_payload"):
+            for key in ("mesh_udp_port", "smtp_port", "imap_port", "poll_interval_seconds", "max_mesh_payload",
+                        "max_email_parts", "email_part_delay_seconds"):
                 raw = request.form.get(key)
                 if raw is not None and raw != "":
                     new_cfg[key] = int(raw)

@@ -32,8 +32,9 @@
     <label>Callsign gateway
       <input type="text" name="callsign" value="{{ cfg.callsign }}">
     </label>
-    <label>Max. délka zprávy
-      <input type="number" name="max_mesh_payload" value="{{ cfg.max_mesh_payload }}" min="20" max="250">
+    <label>Max. délka zprávy (bajty)
+      <input type="number" name="max_mesh_payload" value="{{ cfg.max_mesh_payload }}" min="20" max="150"
+             title="Firmware uzlu přijme nejvýše 150 bajtů UTF-8; písmena s diakritikou zabírají 2 bajty.">
     </label>
   </fieldset>
 
@@ -73,6 +74,13 @@
     </label>
     <label>Interval kontroly (s)
       <input type="number" name="poll_interval_seconds" value="{{ cfg.poll_interval_seconds }}" min="1" max="86400">
+    </label>
+    <label>Max. počet částí e-mailu
+      <input type="number" name="max_email_parts" value="{{ cfg.max_email_parts }}" min="1" max="20"
+             title="Delší e-mail se po tomto počtu MeshCom zpráv zkrátí a poslední část končí [zkráceno].">
+    </label>
+    <label>Pauza mezi částmi (s)
+      <input type="number" name="email_part_delay_seconds" value="{{ cfg.email_part_delay_seconds }}" min="0" max="300">
     </label>
 
     <label>IMAP server

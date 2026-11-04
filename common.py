@@ -46,7 +46,9 @@ DEFAULT_CONFIG = {
     "imap_use_ssl": True,
     "imap_folder": "INBOX",
     "poll_interval_seconds": 5,
-    "max_mesh_payload": 150,
+    "max_mesh_payload": 150,       # bytes (UTF-8); firmware 4.40a drops longer ExtUDP texts
+    "max_email_parts": 4,          # an e-mail is cut after this many MeshCom messages
+    "email_part_delay_seconds": 5,
     "callsign": "OK2ZAW-10",
     "web_username": "admin",
     "web_password": "changeme",

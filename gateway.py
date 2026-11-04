@@ -66,7 +66,7 @@ def log_udp_packet(direction: str, peer: str, data: bytes, status: str) -> None:
 
 def send_udp_message(cfg: dict, dst: str, text: str, source: str = None) -> None:
     """Send one text to the node; with a source ('web', 'email') its delivery is tracked."""
-    text = text[: cfg["max_mesh_payload"]]
+    text = utf8_cut(text, mesh_text_limit(cfg))
     payload = {"type": "msg", "dst": dst, "msg": text}
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     peer = f"{cfg['mesh_node_ip']}:{cfg['mesh_udp_port']}"
@@ -310,66 +310,94 @@ def email_destination(subject: str, default_group: str) -> tuple[str, str]:
     return match.group(1), re.sub(r"^(?:(?:re|fwd?|aw|wg)\s*:\s*)+$", "", rest, flags=re.IGNORECASE).strip()
 
 
-def build_mesh_messages(sender: str, subject: str, body: str, attachments: list[str], max_len: int) -> list[str]:
-    short_sender = re.sub(r"<.*?>", "", sender).strip() or "unknown"
-    body = re.sub(r"\s+", " ", (body or "").strip())
+# The node drops an ExtUDP "msg" longer than 150 bytes (UTF-8, not characters:
+# extudp_functions.cpp in firmware 4.40a), so every length here counts bytes.
+MESHCOM_MAX_TEXT_BYTES = 150
+TRUNCATED_MARK = " [zkráceno]"
+
+
+def utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
+
+
+def utf8_cut(text: str, max_bytes: int) -> str:
+    """Longest prefix of text that fits max_bytes without splitting a character."""
+    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
+
+
+def mesh_text_limit(cfg: dict) -> int:
+    return min(int(cfg.get("max_mesh_payload", MESHCOM_MAX_TEXT_BYTES)), MESHCOM_MAX_TEXT_BYTES)
+
+
+def _split_words(text: str, first: int, rest: int) -> list[str]:
+    """Split text into pieces of at most first, then rest bytes, preferring word boundaries."""
+    pieces = []
+    while text:
+        limit = rest if pieces else first
+        if utf8_len(text) <= limit:
+            pieces.append(text)
+            break
+        piece = utf8_cut(text, limit)
+        if " " in piece:
+            piece = piece.rsplit(" ", 1)[0].rstrip() or piece
+        if not piece:   # limit too small for even one character
+            break
+        pieces.append(piece)
+        text = text[len(piece):].lstrip()
+    return pieces
+
+
+def build_mesh_messages(sender: str, subject: str, body: str, attachments: list[str], max_len: int,
+                        max_parts: int = 0) -> list[str]:
+    """MeshCom texts for one e-mail, each at most max_len bytes.
+
+    Several parts carry "(n/N)" after the subject (or the sender without a subject); only the
+    first lists the attachments. With max_parts > 0 the text is cut after that many parts and
+    the last one ends with TRUNCATED_MARK.
+    """
+    max_len = max(20, min(int(max_len), MESHCOM_MAX_TEXT_BYTES))
+    short_sender = utf8_cut(re.sub(r"<.*?>", "", sender).strip() or "unknown", max_len // 4).strip()
+    subject = re.sub(r"\s+", " ", (subject or "").strip())
+    body = re.sub(r"\s+", " ", (body or "").strip()) or "(bez textu)"
 
     attachment_summary = ""
     if attachments:
-        unique_attachments = []
-        seen = set()
-        for item in attachments:
-            if item not in seen:
-                unique_attachments.append(item)
-                seen.add(item)
-        attachment_summary = " | Příloha: " + ", ".join(unique_attachments[:3])
+        unique_attachments = list(dict.fromkeys(attachments))
+        attachment_summary = "Příloha: " + ", ".join(unique_attachments[:3])
         if len(unique_attachments) > 3:
             attachment_summary += ", ..."
+        attachment_summary = utf8_cut(attachment_summary, max_len // 4)
 
-    if not body:
-        body = "(bez textu)"
+    def prefix(number: int, total: int, first: bool) -> str:
+        tag = f" ({number}/{total})" if total > 1 else ""
+        extra = f" | {attachment_summary}" if first and attachment_summary else ""
+        if not subject:
+            return f"{short_sender}{tag}: " + (f"{attachment_summary} - " if extra else "")
+        # Keep at least half of each message for the text: shorten a long subject.
+        room = max_len // 2 - utf8_len(f"{short_sender}: {tag}{extra} - ")
+        title = subject if utf8_len(subject) <= room else utf8_cut(subject, room - 3).rstrip() + "..."
+        return f"{short_sender}: {title}{tag}{extra} - "
 
-    if subject or attachment_summary:
-        first_prefix = f"{short_sender}: {subject}{attachment_summary} - "
-    else:
-        first_prefix = f"{short_sender}: "
-    if subject:
-        continuation_prefix = f"{short_sender}: {subject} (pokračování) - "
-    else:
-        continuation_prefix = f"{short_sender} (pokračování): "
+    # The "(n/N)" tag width depends on N, so split until the part count is stable.
+    total = 1
+    for _ in range(4):
+        first, later = prefix(1, total, True), prefix(total, total, False)
+        pieces = _split_words(body, max_len - utf8_len(first), max_len - utf8_len(later))
+        if len(pieces) == total or (max_parts and total == max_parts and len(pieces) > total):
+            break
+        total = min(len(pieces), max_parts) if max_parts else len(pieces)
 
-    def truncate_prefix(prefix: str) -> str:
-        if len(prefix) <= max_len:
-            return prefix
-        return prefix[: max_len - 6].rstrip() + "... "
-
-    first_prefix = truncate_prefix(first_prefix)
-    continuation_prefix = truncate_prefix(continuation_prefix)
+    truncated = bool(max_parts) and len(pieces) > max_parts
+    if truncated:
+        pieces = pieces[:max_parts]
+    total = len(pieces)
     parts = []
-    remaining = body
-    current_prefix = first_prefix
-
-    while remaining:
-        available = max_len - len(current_prefix)
-        if available <= 0:
-            parts.append(current_prefix[:max_len])
-            break
-
-        if len(remaining) <= available:
-            parts.append(current_prefix + remaining)
-            break
-
-        piece = remaining[:available].rsplit(" ", 1)[0].strip() if " " in remaining[:available] else remaining[:available]
-        if not piece:
-            piece = remaining[:available]
-
-        parts.append(current_prefix + piece)
-        remaining = remaining[len(piece):].lstrip()
-        current_prefix = continuation_prefix
-
-    if not parts:
-        parts.append(first_prefix + "(bez textu)")
-
+    for index, piece in enumerate(pieces, start=1):
+        head = prefix(index, total, index == 1)
+        if truncated and index == total:
+            room = max_len - utf8_len(head) - utf8_len(TRUNCATED_MARK)
+            piece = (_split_words(piece, room, room) or [""])[0] + TRUNCATED_MARK
+        parts.append(head + piece)
     return parts
 
 
@@ -461,9 +489,16 @@ def poll_maildir():
                 continue
 
             group, mesh_subject = email_destination(subject, cfg["mesh_group"])
-            messages = build_mesh_messages(sender, mesh_subject, body, attachments, cfg["max_mesh_payload"])
+            max_parts = int(cfg.get("max_email_parts", 4))
+            messages = build_mesh_messages(sender, mesh_subject, body, attachments,
+                                           mesh_text_limit(cfg), max_parts)
+            if messages[-1].endswith(TRUNCATED_MARK):
+                log.warning("Email %s exceeds %d parts; the rest was cut off", fpath, max_parts)
             all_ok = True
-            for text in messages:
+            for index, text in enumerate(messages):
+                if index:
+                    # Pause so the parts do not leave as one burst on the shared channel.
+                    time.sleep(max(0, float(cfg.get("email_part_delay_seconds", 5))))
                 try:
                     send_udp_message(cfg, group, text, source="email")
                     common.log_message("email_to_mesh", sender, subject, text, status="ok")

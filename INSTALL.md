@@ -116,6 +116,8 @@ Upravte soubor `config.json`:
   "imap_folder": "INBOX",
   "poll_interval_seconds": 5,
   "max_mesh_payload": 150,
+  "max_email_parts": 4,
+  "email_part_delay_seconds": 5,
   "callsign": "OK2ZAW-10",
   "web_username": "admin",
   "web_password": "changeme"
@@ -128,6 +130,7 @@ Důležité:
 - `mesh_group` musí odpovídat skupině, ze které chcete přijímat a do které posílat
 - `maildir_new` a `maildir_cur` musí být přístupné pro uživatele, který spouští gateway
 - `imap_*` nastavení je pro externí IMAP frontu; pokud je prázdné, gateway pracuje jen s lokálním Maildir
+- `max_mesh_payload` je délka jedné MeshCom zprávy v bajtech UTF-8 (nejvýše 150, víc firmware uzlu nepřijme); `max_email_parts` omezuje, na kolik zpráv se jeden e-mail rozdělí (zbytek se zahodí a poslední část končí `[zkráceno]`), `email_part_delay_seconds` je pauza mezi částmi
 
 ## 6. Spuštění gateway
 

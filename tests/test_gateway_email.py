@@ -706,6 +706,100 @@ class GatewayEmailTests(unittest.TestCase):
             self.assertIn("report.pdf", chunks[0])
             self.assertNotIn("binarydata", " ".join(chunks))
 
+    def test_email_parts_are_numbered_and_fit_node_byte_limit(self):
+        text = "Příliš žluťoučký kůň úpěl ďábelské ódy. " * 6
+        parts = gateway.build_mesh_messages("Jan Novák <jan@example.net>", "Hlášení", text, ["a.pdf"], 150)
+
+        self.assertEqual(len(parts), 4)   # 329 bytes of text
+        self.assertTrue(all(gateway.utf8_len(part) <= 150 for part in parts))
+        self.assertTrue(parts[0].startswith("Jan Novák: Hlášení (1/4) | Příloha: a.pdf - Příliš"))
+        self.assertTrue(parts[3].startswith("Jan Novák: Hlášení (4/4) - "))
+        self.assertNotIn("Příloha", parts[1])
+        # word boundaries: nothing lost, nothing glued together
+        bodies = [part.split(" - ", 1)[1] for part in parts]
+        self.assertEqual(" ".join(bodies), text.strip())
+
+        self.assertEqual(gateway.build_mesh_messages("Jan <j@x>", "", "a " * 100, [], 150)[1][:11], "Jan (2/2): ")
+        self.assertEqual(gateway.build_mesh_messages("Jan <j@x>", "Krátce", "Ahoj", [], 150), ["Jan: Krátce - Ahoj"])
+
+    def test_email_is_cut_after_max_parts(self):
+        text = " ".join(f"slovo{i}" for i in range(200))
+        parts = gateway.build_mesh_messages("Jan <j@x>", "Dlouhé", text, [], 150, max_parts=4)
+
+        self.assertEqual(len(parts), 4)
+        self.assertTrue(parts[3].startswith("Jan: Dlouhé (4/4) - "))
+        self.assertTrue(parts[3].endswith(" [zkráceno]"))
+        self.assertTrue(all(gateway.utf8_len(part) <= 150 for part in parts))
+        self.assertRegex(parts[3], r"slovo\d+ \[zkráceno\]$")   # cut between words
+        self.assertEqual(len(gateway.build_mesh_messages("Jan <j@x>", "", text, [], 150, max_parts=0)), 13)
+
+    def test_send_udp_message_cuts_bytes_on_character_boundary(self):
+        cfg = {"max_mesh_payload": 250, "mesh_node_ip": "127.0.0.1", "mesh_udp_port": 9}
+        with patch.object(gateway.socket, "socket") as sock, \
+             patch.object(gateway, "update_udp_monitor"), \
+             patch.object(gateway, "log_udp_packet"):
+            gateway.send_udp_message(cfg, "262", "ž" * 100)
+
+        payload = gateway.json.loads(sock.return_value.sendto.call_args[0][0])
+        self.assertEqual(payload["msg"], "ž" * 75)   # 150 bytes, the firmware limit
+
+    def test_maildir_email_parts_are_sent_with_pause(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            maildir = os.path.join(tmpdir, "new")
+            os.makedirs(maildir)
+            cfg = {"maildir_new": maildir, "maildir_cur": os.path.join(tmpdir, "cur"),
+                   "poll_interval_seconds": 0, "max_mesh_payload": 150, "mesh_group": "12345",
+                   "max_email_parts": 2, "email_part_delay_seconds": 7}
+            sends, pauses = [], []
+
+            def fake_sleep(seconds):
+                if seconds == 7:
+                    pauses.append(seconds)
+                    return
+                if sends:
+                    raise KeyboardInterrupt
+                if not os.listdir(maildir):
+                    message = EmailMessage()
+                    message["From"] = "Jan <jan@example.com>"
+                    message["Subject"] = "Zpráva"
+                    message.set_content("text " * 100)
+                    with open(os.path.join(maildir, "1.eml"), "wb") as handle:
+                        handle.write(message.as_bytes())
+
+            with patch.object(gateway.common, "load_config", return_value=cfg), \
+                 patch.object(gateway.time, "sleep", side_effect=fake_sleep), \
+                 patch.object(gateway, "send_udp_message", side_effect=lambda *a, **k: sends.append(a[2])), \
+                 patch.object(gateway.common, "log_message"), \
+                 patch.object(gateway.common, "archive_mail_file", return_value="archived"):
+                with self.assertRaises(KeyboardInterrupt):
+                    gateway.poll_maildir()
+
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(pauses, [7])
+        self.assertTrue(sends[0].startswith("Jan: Zpráva (1/2) - "))
+        self.assertTrue(sends[1].endswith(" [zkráceno]"))
+
+    def test_web_send_counts_bytes(self):
+        cfg = {"web_password": "", "mesh_group": "12345", "max_mesh_payload": 150}
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.gateway, "send_udp_message") as send_udp:
+            with webapp.app.test_client() as client:
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                client.post("/send", data={"csrf_token": "test-token", "message": "ř" * 76})
+                page = client.get("/messages").get_data(as_text=True)
+
+        send_udp.assert_not_called()   # 76 characters, but 152 bytes
+        self.assertIn("152 bajtů", page)
+        self.assertIn('id="mesh-message-left">150<', page)
+
+    def test_validate_config_limits_parts_and_payload_bytes(self):
+        errors = webapp.validate_config_values(
+            {"max_mesh_payload": "200", "max_email_parts": "0", "email_part_delay_seconds": "-1"}, {})["errors"]
+        self.assertEqual(set(errors), {"max_mesh_payload", "max_email_parts", "email_part_delay_seconds"})
+        self.assertTrue(webapp.validate_config_values(
+            {"max_mesh_payload": "150", "max_email_parts": "4", "email_part_delay_seconds": "5"}, {})["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

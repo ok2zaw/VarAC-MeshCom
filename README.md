@@ -66,10 +66,28 @@ složky `imap_folder` přes IMAP). Z každého e-mailu sestaví text:
   mezery se slijí do jedné mezery. E-mail jen v HTML bez textové části dorazí
   jako `(bez textu)`, proto posílejte prostý text.
 - **Přílohy** se neposílají, uvedou se jen první tři názvy.
-- **Délka**: jedna MeshCom zpráva má nejvýše `max_mesh_payload` znaků
-  (výchozí 150). Delší text se rozdělí na hranici slov a další části mají
-  prefix `<odesílatel>: <předmět> (pokračování) - `. Části se zatím odesílají
-  hned za sebou, bez pauzy, takže pište raději krátce.
+- **Délka**: jedna MeshCom zpráva má nejvýše `max_mesh_payload` **bajtů**
+  UTF-8 (výchozí a zároveň nejvyšší hodnota je 150). Delší text firmware 4.40a
+  zahodí a do logu uzlu zapíše `[EXT] invalid lengths`. Písmena s diakritikou
+  zabírají 2 bajty, takže se česká zpráva vejde zhruba do 100–140 znaků.
+- **Dělení na části**: delší e-mail se rozdělí na hranici slov a každá část
+  nese v předmětu své pořadí. Přílohy jsou uvedené jen v první části:
+
+  ```
+  Jan Novák: Hlášení (1/3) | Příloha: foto.jpg - Ahoj, posílám …
+  Jan Novák: Hlášení (2/3) - … pokračování textu …
+  Jan Novák: Hlášení (3/3) - … konec.
+  ```
+
+  Bez předmětu je pořadí za jménem: `Jan Novák (2/3): …`. Příliš dlouhý
+  předmět se zkrátí se třemi tečkami tak, aby na text zbyla aspoň polovina
+  zprávy.
+- **Maximální délka e-mailu**: `max_email_parts` (výchozí 4) omezuje počet
+  částí. Text za touto hranicí se zahodí a poslední část končí
+  ` [zkráceno]`. Při výchozích hodnotách se tak přenese zhruba 400–500 znaků
+  textu.
+- **Pauza** `email_part_delay_seconds` (výchozí 5 s) mezi částmi brání tomu,
+  aby uzel vysílal celý e-mail jednou dávkou.
 - Po úspěšném odeslání všech částí se e-mail přesune do `Maildir/cur`.
 
 ### Cílová skupina v předmětu
