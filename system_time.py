@@ -10,7 +10,8 @@ writes a request file that the root helper scripts/meshcom-ntp applies
 import os
 import re
 import subprocess
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_DIR = Path(__file__).resolve().parent
@@ -49,7 +50,8 @@ def _properties(output: str) -> dict:
 
 def status() -> dict:
     """Current clock state; `error` is set when timedatectl is unavailable."""
-    state = {"now": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"), "error": None,
+    state = {"now": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+             "utc_now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"), "error": None,
              "timezone": None, "ntp": None, "synchronized": None, "can_ntp": None,
              "server": None, "servers": "", "fallback_servers": "", "helper_ready": ntp_helper_ready()}
     try:
@@ -84,6 +86,7 @@ def set_timezone(zone: str) -> None:
     if zone not in timezones():
         raise TimeError(f"Neznámé časové pásmo {zone}.")
     _timedatectl("set-timezone", zone)
+    time.tzset()  # running processes cache the zone; reload it for this one (the gateway needs a restart)
 
 
 def set_ntp(enabled: bool) -> None:

@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime
 from email.message import EmailMessage
@@ -170,6 +171,28 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(text, "EMAIL: jan@example.org x")
         self.assertIn("není povolena", refused)
         self.assertIn("není povolena", resolve("EMAIL: jan@example.net x", mesh_email_all_domains=False)[2])
+
+    def test_web_times_follow_pi_zone_or_utc(self):
+        with patch.dict(os.environ, {"TZ": "Europe/Prague"}):
+            time.tzset()
+            try:
+                rows = [{"ts": "2026-11-04 12:00:00"}, {"ts": "2026-07-04 12:00:00"}, {"ts": None}]
+                self.assertEqual([r["ts"] for r in webapp.format_message_rows([dict(r) for r in rows], {})],
+                                 ["2026-11-04 13:00:00", "2026-07-04 14:00:00", None])
+                self.assertEqual([r["ts"] for r in webapp.format_message_rows([dict(r) for r in rows],
+                                                                              {"display_utc": True})][:2],
+                                 ["2026-11-04 12:00:00 UTC", "2026-07-04 12:00:00 UTC"])
+                epoch = 1793793600  # 2026-11-04 12:00:00 UTC
+                self.assertEqual(webapp.format_ts(epoch, {}, "%H:%M"), "13:00")
+                self.assertEqual(webapp.format_ts(epoch, {"display_utc": True}, "%H:%M"), "12:00 UTC")
+                with webapp.app.test_request_context("/?start=2026-11-04&end=2026-11-04"):
+                    local = webapp.parse_date_range(7, {})
+                    utc = webapp.parse_date_range(7, {"display_utc": True})
+                self.assertEqual(local[2], epoch - 13 * 3600)
+                self.assertEqual(utc[2:], (epoch - 12 * 3600, epoch + 12 * 3600))
+            finally:
+                os.environ.pop("TZ", None)
+                time.tzset()
 
     def test_email_aliases_are_stored_uppercase_and_validated(self):
         with tempfile.TemporaryDirectory() as tmpdir, \

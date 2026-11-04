@@ -757,6 +757,10 @@ synchronizace a dá se tam:
 - zapnout nebo vypnout **NTP**,
 - zadat vlastní **NTP servery** (např. `tik.cesnet.cz ntp.nic.cz`; prázdné pole
   vrátí výchozí servery distribuce),
+- zvolit, zda web zobrazuje časy v **UTC** (s příponou `UTC`), nebo v časovém
+  pásmu Raspberry Pi (výchozí). Podle této volby se řídí i filtry data od/do.
+  Volba se ukládá do `config.json` jako `display_utc` a funguje i bez polkitu
+  a helperu,
 - při vypnutém NTP **nastavit čas ručně**. Tlačítko *Čas z prohlížeče* doplní
   čas z počítače, na kterém je web otevřený. To se hodí v terénu bez
   internetu, protože Raspberry Pi bez baterie RTC po vypnutí čas ztratí.

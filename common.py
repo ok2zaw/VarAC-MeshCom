@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     "max_email_parts": 4,          # an e-mail is cut after this many MeshCom messages
     "email_part_delay_seconds": 5,
     "callsign": "OK2ZAW-10",
+    "display_utc": False,          # web shows times in UTC instead of the Pi's time zone
     "web_username": "admin",
     "web_password": "changeme",
     "radio_display": ":0",

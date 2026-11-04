@@ -114,6 +114,16 @@ class SystemTimeWebTests(unittest.TestCase):
         set_ntp.assert_called_once_with(False)
         request_servers.assert_called_once_with("ntp.nic.cz")
 
+    def test_display_utc_is_saved_to_config(self):
+        with patch.object(webapp.system_time, "status", return_value=self._status()), \
+             patch.object(webapp.common, "save_config") as save_config:
+            self.client.post("/config/time", data={"csrf_token": "token", "action": "apply",
+                                                   "timezone": "Europe/Prague", "ntp": "on", "display_utc": "on"})
+            self.client.post("/config/time", data={"csrf_token": "token", "action": "apply",
+                                                   "timezone": "Europe/Prague", "ntp": "on"})
+        save_config.assert_called_once()
+        self.assertTrue(save_config.call_args.args[0]["display_utc"])
+
     def test_errors_are_flashed_and_page_shows_time(self):
         with patch.object(webapp.system_time, "status", return_value=self._status(ntp=False)), \
              patch.object(webapp.system_time, "timezones", return_value=["Europe/Prague", "UTC"]), \

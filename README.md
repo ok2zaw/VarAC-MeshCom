@@ -39,8 +39,8 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	slyšené za posledních 30 dní). Délka se kontroluje v bajtech a pokus se
 	zaznamená do historie.
 - V **Nastavení** → *Čas Raspberry Pi* zvolit časové pásmo, zapnout či vypnout
-	NTP, zadat NTP servery a bez internetu nastavit čas ručně (i podle hodin
-	prohlížeče). Vyžaduje jednorázovou instalaci polkit pravidla a helperu
+	NTP, zadat NTP servery, přepnout zobrazení časů na webu do UTC a bez
+	internetu nastavit čas ručně (i podle hodin prohlížeče). Vyžaduje jednorázovou instalaci polkit pravidla a helperu
 	(INSTALL, kapitola 9.5).
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.

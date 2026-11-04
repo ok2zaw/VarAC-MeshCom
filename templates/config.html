@@ -172,7 +172,7 @@
   <fieldset>
     <legend>Čas Raspberry Pi</legend>
     <p class="hint">
-      Teď: <strong>{{ time_status.now }}</strong>
+      Teď: <strong>{{ time_status.now }}</strong> ({{ time_status.utc_now }})
       {% if time_status.error %}– {{ time_status.error }}
       {% else %}· NTP {{ 'zapnuto' if time_status.ntp else 'vypnuto' }},
         {{ 'synchronizováno' if time_status.synchronized else 'nesynchronizováno' }}{% if time_status.server %} ({{ time_status.server }}){% endif %}
@@ -191,6 +191,10 @@
     <label class="checkbox">
       <input type="checkbox" name="ntp" {{ 'checked' if time_status.ntp }}>
       Synchronizovat čas přes NTP
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="display_utc" {{ 'checked' if cfg.display_utc }}>
+      Zobrazovat časy na webu v UTC (jinak v čase Raspberry Pi)
     </label>
     <button type="submit" name="action" value="apply" class="fieldset-button row-button">Uložit čas</button>
 

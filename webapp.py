@@ -28,7 +28,7 @@ import re
 import secrets
 import socket
 import time
-from datetime import date, datetime, time as datetime_time, timedelta
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from functools import wraps
 
 from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
@@ -150,7 +150,7 @@ def status():
     alive = hb is not None and (now - hb) < 30
     age = round(now - hb) if hb else None
     counts = common.count_messages()
-    recent = common.get_recent_messages(limit=10)
+    recent = format_message_rows(common.get_recent_messages(limit=10), cfg)
     udp = common.get_udp_activity()
     return render_template(
         "status.html",
@@ -207,7 +207,7 @@ def messages():
     cfg = common.load_config()
     page = max(int(request.args.get("page", 1)), 1)
     per_page = 25
-    rows = common.get_recent_messages(limit=per_page, offset=(page - 1) * per_page)
+    rows = format_message_rows(common.get_recent_messages(limit=per_page, offset=(page - 1) * per_page), cfg)
     counts = common.count_messages()
     total_pages = max((counts["total"] + per_page - 1) // per_page, 1)
     outgoing = common.get_outgoing_messages(limit=20)
@@ -215,8 +215,8 @@ def messages():
     known_groups = [row["channel"] for row in common.get_rf_channel_summary(time.time() - 30 * 86400, time.time())
                     if row["kind"] == "group"]
     for row in outgoing:
-        row["created_label"] = datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
-        row["status_label_time"] = datetime.fromtimestamp(row["status_at"]).strftime("%H:%M:%S")
+        row["created_label"] = format_ts(row["created_at"], cfg)
+        row["status_label_time"] = format_ts(row["status_at"], cfg, "%H:%M:%S")
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
         cfg=cfg, outgoing=outgoing, max_length=gateway.mesh_text_limit(cfg),
@@ -225,9 +225,29 @@ def messages():
     )
 
 
-def parse_date_range(default_days: int):
-    """Inclusive ?start=&end= dates as (start_day, end_day, since, until)."""
-    today = date.today()
+def format_ts(epoch: float, cfg: dict, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """Epoch seconds in the Pi's time zone, or in UTC when display_utc is on."""
+    moment = datetime.fromtimestamp(epoch, timezone.utc)
+    if cfg.get("display_utc"):
+        return moment.strftime(fmt) + " UTC"
+    return moment.astimezone().strftime(fmt)
+
+
+def format_message_rows(rows: list, cfg: dict) -> list:
+    """The message log stores ts as SQLite datetime('now'), i.e. UTC text."""
+    for row in rows:
+        try:
+            stamp = datetime.strptime(row["ts"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        row["ts"] = format_ts(stamp.timestamp(), cfg)
+    return rows
+
+
+def parse_date_range(default_days: int, cfg: dict):
+    """Inclusive ?start=&end= dates as (start_day, end_day, since, until), in the display time zone."""
+    zone = timezone.utc if cfg.get("display_utc") else None
+    today = datetime.now(zone).date()
     start_value = request.args.get("start", (today - timedelta(days=default_days - 1)).isoformat())
     end_value = request.args.get("end", today.isoformat())
     try:
@@ -237,8 +257,8 @@ def parse_date_range(default_days: int):
         abort(400, description="Neplatný formát data; použijte RRRR-MM-DD.")
     if start_day > end_day:
         abort(400, description="Datum od musí být před datem do.")
-    since = datetime.combine(start_day, datetime_time.min).timestamp()
-    until = datetime.combine(end_day + timedelta(days=1), datetime_time.min).timestamp()
+    since = datetime.combine(start_day, datetime_time.min, zone).timestamp()
+    until = datetime.combine(end_day + timedelta(days=1), datetime_time.min, zone).timestamp()
     return start_day, end_day, since, until
 
 
@@ -246,19 +266,19 @@ def parse_date_range(default_days: int):
 @requires_auth
 def mesh_messages():
     cfg = common.load_config()
-    start_day, end_day, since, until = parse_date_range(default_days=7)
+    start_day, end_day, since, until = parse_date_range(default_days=7, cfg=cfg)
     channel = request.args.get("channel", "").strip().upper()
     kind = request.args.get("kind", "")
     if channel or kind not in {"group", "direct"}:
         kind = ""
     channels = common.get_rf_channel_summary(since, until)
     for row in channels:
-        row["last_at_label"] = datetime.fromtimestamp(row["last_at"]).strftime("%Y-%m-%d %H:%M")
+        row["last_at_label"] = format_ts(row["last_at"], cfg, "%Y-%m-%d %H:%M")
     rows = common.get_heard_rf_messages(since, until, channel, limit=500, kind=kind)
     own_callsign = str(cfg.get("callsign", "")).strip().upper()
     delivery = common.get_delivery_by_msg_id([row["msg_id"] for row in rows if row["station"] == own_callsign])
     for row in rows:
-        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["observed_at_label"] = format_ts(row["observed_at"], cfg)
         row["kind"] = common.channel_kind(row["channel"])
         row["delivery"] = delivery.get(row["msg_id"]) if row["station"] == own_callsign else None
     return render_template(
@@ -294,7 +314,7 @@ def udp_monitor():
         direction = ""
     packets = common.get_udp_packets(limit=200, direction=direction or None)
     for row in packets:
-        row["ts_label"] = datetime.fromtimestamp(row["ts"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["ts_label"] = format_ts(row["ts"], cfg)
     gateway_hb = common.get_heartbeat("gateway")
     listener_hb = common.get_heartbeat(gateway.UDP_LISTENER_HEARTBEAT)
     return render_template(
@@ -310,7 +330,8 @@ def udp_monitor():
 @app.route("/stations")
 @requires_auth
 def stations():
-    start_day, end_day, since, until = parse_date_range(default_days=30)
+    cfg = common.load_config()
+    start_day, end_day, since, until = parse_date_range(default_days=30, cfg=cfg)
     selected_station = request.args.get("station", "").strip().upper()
     summary = common.get_station_summary(since, until)
     history_count = common.count_station_history(since, until, selected_station)
@@ -323,8 +344,8 @@ def stations():
         row["presence"] = common.station_presence(row["last_seen"], now)
         row["presence_icon"], row["presence_label"] = common.STATION_PRESENCE[row["presence"]]
         row["age_label"] = common.age_label(now - row["last_seen"])
-        row["first_seen_label"] = datetime.fromtimestamp(row["first_seen"]).strftime("%Y-%m-%d %H:%M:%S")
-        row["last_seen_label"] = datetime.fromtimestamp(row["last_seen"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["first_seen_label"] = format_ts(row["first_seen"], cfg)
+        row["last_seen_label"] = format_ts(row["last_seen"], cfg)
         row["direct"] = row["heard_from"] == row["station"]
         row["distance_km"] = None
         if row["latitude"] is None or row["longitude"] is None:
@@ -340,7 +361,7 @@ def stations():
         } | {"url": url_for("stations", start=start_day.isoformat(), end=end_day.isoformat(),
                             station=row["station"], _anchor="station-history")})
     for row in history:
-        row["observed_at_label"] = datetime.fromtimestamp(row["observed_at"]).strftime("%Y-%m-%d %H:%M:%S")
+        row["observed_at_label"] = format_ts(row["observed_at"], cfg)
 
     return render_template(
         "stations.html",
@@ -444,6 +465,11 @@ def system_time_settings():
             system_time.set_time(request.form.get("manual_time", ""))
             flash("Čas Raspberry Pi nastaven.", "success")
         else:
+            display_utc = request.form.get("display_utc") == "on"
+            cfg = common.load_config()
+            if display_utc != bool(cfg.get("display_utc")):
+                common.save_config({**cfg, "display_utc": display_utc})
+                done.append("časy na webu v UTC" if display_utc else "časy na webu v čase Raspberry Pi")
             current = system_time.status()
             zone = request.form.get("timezone", "").strip()
             if zone and zone != current["timezone"]:
