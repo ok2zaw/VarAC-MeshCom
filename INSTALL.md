@@ -1349,6 +1349,22 @@ VarAC nepotřebují přihlášený desktop.
    LinBPQ 15 s) a uložte.
 3. Tlačítkem **Spustit** spusťte TNC a potom LinBPQ. Po změně nastavení
    běžící služby restartujte tlačítkem **Restart**.
+4. Pod formulářem je panel **Výpis a provoz**. Vyberte službu a uvidíte její
+   výpis z journalu (50–500 řádků, obnovuje se každé 3 s). Volba *jen provoz
+   (RX/TX)* nechá jen řádky s rámci: `LoRa RX[RSSI/SNR, bajty]` pro příjem a
+   `LoRa TX …` / `TX DONE` pro vysílání. Karta služby, která po startu hned
+   spadne a systemd ji opakovaně restartuje, ukazuje **Padá, restartuje se**
+   a odkaz na výpis s chybou.
+
+Výpis se čte příkazem `journalctl --user-unit=<služba>`. Když je journal jen
+v RAM (výchozí stav, kapitola 9.2), zapisují uživatelské služby do systémového
+journalu. Ten účet `ok2zaw` čte jen jako člen skupiny `adm` nebo
+`systemd-journal`. Pokud panel hlásí, že výpis není dostupný:
+
+```bash
+sudo usermod -aG systemd-journal ok2zaw
+sudo systemctl restart meshcom-web
+```
 
 Ruční kontrola:
 
@@ -1464,4 +1480,6 @@ Každá stažená zpráva pak přistane v místní schránce i v BBS u uživatel
 | Web nevytvoří službu TNC | vyplňte kmitočet a zkontrolujte hlášení po uložení |
 | Spojení přes LoRa se rozpadá | zvyšte `FRACK`, snižte `PACLEN`, `MAXFRAME=1`; ověřte stejné LoRa parametry protistanice |
 | Pošta do BBS nedojde | `journalctl -u postfix`; SMTP port BPQMail (`ss -ltn \| grep 8025`), doména v `transport` |
+| Karta TNC ukazuje „Padá, restartuje se“ | otevřete panel *Výpis a provoz* pro daný TNC; poslední řádky (`Traceback`, `RuntimeError`, `No such file`) ukazují příčinu – typicky GPIO, SPI nebo chybějící balík (12.1) |
+| Panel výpisu je prázdný nebo hlásí nedostupný výpis | `sudo usermod -aG systemd-journal ok2zaw`, restart webu; ručně `journalctl --user-unit=meshcom-tnc1 -n 50` |
 | Záložka BPQ hlásí, že služba není vytvořená | povolte TNC (TNC je osazen) a uložte nastavení na záložce BPQ |

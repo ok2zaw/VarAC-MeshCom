@@ -235,16 +235,30 @@ def restart(app: str, cfg: dict | None = None) -> None:
     start(app, cfg)
 
 
+JOURNAL_HINT = ("Výpis není dostupný: journal je jen v RAM a logy uživatelských služeb jsou v systémovém "
+                "journalu. Přidejte účet do skupiny systemd-journal (`sudo usermod -aG systemd-journal "
+                "{user}`, pak restart webu), nebo zapněte trvalý journal (INSTALL, kapitola 9.2).")
+
+
 def unit_log(unit: str, lines: int = 15) -> str:
-    try:
-        result = _run(
-            ["journalctl", "--user", "-u", unit, "-n", str(lines),
-             "--no-pager", "-o", "short-iso"],
-            check=False,
-        )
-    except RadioError:
-        return ""
-    return result.stdout.strip()
+    """Newest journal lines of a user unit.
+
+    `--user-unit` also finds the lines when the journal is volatile and user
+    units log into the system journal, where `journalctl --user` sees nothing.
+    """
+    options = ["-n", str(lines), "--no-pager", "-o", "short-iso"]
+    hint = False
+    for arguments in (["journalctl", f"--user-unit={unit}", *options],
+                      ["journalctl", "--user", "-u", unit, *options]):
+        try:
+            result = _run(arguments, check=False)
+        except RadioError:
+            return ""
+        output = result.stdout.strip()
+        if output and output != "-- No entries --":
+            return output
+        hint = hint or "not seeing messages" in result.stderr
+    return JOURNAL_HINT.format(user=getpass.getuser()) if hint else ""
 
 
 def recent_log(app: str, lines: int = 15) -> str:

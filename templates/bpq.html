@@ -8,11 +8,13 @@
 <div class="cards">
   {% for item in services %}
   {% set state = item.status.state %}
-  <div class="card {{ 'ok' if state == 'active' else 'bad' if state == 'failed' else '' }}">
+  <div class="card {{ 'ok' if state == 'active' else 'bad' if state == 'failed' or (state == 'activating' and item.status.sub_state == 'auto-restart') else '' }}">
     <div class="card-label">{{ item.label }}{% if item.name in tncs %} · port {{ cfg[item.name ~ '_tcp_port'] }}{% endif %}</div>
-    <div class="card-value">{% if state == 'active' %}🟢{% elif state == 'failed' %}🔴{% else %}⚪{% endif %} {{ state_labels.get(state, state) }}</div>
+    {% set crashing = state == 'activating' and item.status.sub_state == 'auto-restart' %}
+    <div class="card-value">{% if state == 'active' %}🟢{% elif state == 'failed' or crashing %}🔴{% else %}⚪{% endif %} {{ 'Padá, restartuje se' if crashing else state_labels.get(state, state) }}</div>
     <div class="card-sub">
       {% if not item.enabled %}není povolen
+      {% elif crashing %}program po startu skončil chybou; důvod je ve <a class="clear-filter" href="#service-log" data-log-service="{{ item.name }}">výpisu</a>
       {% elif item.status.error %}{{ item.status.error }}
       {% elif item.status.since %}od {{ item.status.since }}
       {% elif item.status.enabled in ('', 'not-found') %}služba zatím není vytvořená
@@ -117,11 +119,77 @@
   <button type="submit">Uložit</button>
 </form>
 
-<h2>Poslední výpis služeb</h2>
-{% for item in services %}
-<details class="radio-log">
-  <summary>{{ item.label }} <span class="hint">({{ item.unit }})</span></summary>
-  <pre>{{ item.log or 'Žádný záznam v journalu.' }}</pre>
-</details>
-{% endfor %}
+<h2 id="service-log">Výpis a provoz</h2>
+<p class="map-legend map-controls log-controls">
+  <label>Služba
+    <select id="log-service">
+      {% for item in services %}<option value="{{ item.name }}">{{ item.label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Řádků
+    <select id="log-lines">
+      {% for count in log_lines %}<option{{ ' selected' if loop.index == 2 }}>{{ count }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="map-toggle"><input type="checkbox" id="log-traffic"> jen provoz (RX/TX)</label>
+  <label class="map-toggle"><input type="checkbox" id="log-follow" checked> obnovovat každé 3 s</label>
+  <span class="hint" id="log-state"></span>
+</p>
+<pre class="service-log" id="log-output">{{ services[0].log or 'Žádný záznam v journalu.' }}</pre>
+<p class="log-note">TNC zapisuje každý přijatý rámec jako <code>LoRa RX[RSSI/SNR, bajty]</code> a odeslaný jako
+  <code>LoRa TX …</code> / <code>TX DONE</code>. Výpis je z journalu (<code>journalctl --user-unit</code>).</p>
+
+<script>
+(() => {
+  const url = {{ url_for('bpq_log')|tojson }};
+  const service = document.getElementById("log-service");
+  const lines = document.getElementById("log-lines");
+  const traffic = document.getElementById("log-traffic");
+  const follow = document.getElementById("log-follow");
+  const output = document.getElementById("log-output");
+  const state = document.getElementById("log-state");
+  const trafficLine = /LoRa (RX|TX)|TX DONE|Receive Error|No Payload|Channel busy|TX failed/;
+  const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (error) {} };
+  const recall = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
+  let raw = output.textContent;
+  let timer = null;
+
+  const render = () => {
+    const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 30;
+    const shown = traffic.checked ? raw.split("\n").filter((line) => trafficLine.test(line)) : raw.split("\n");
+    output.textContent = shown.join("\n") || (traffic.checked ? "Zatím žádný provoz." : "Žádný záznam v journalu.");
+    if (atBottom) output.scrollTop = output.scrollHeight;
+  };
+  const load = async () => {
+    try {
+      const response = await fetch(`${url}?service=${encodeURIComponent(service.value)}&lines=${lines.value}`,
+                                   { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      raw = data.log || "";
+      state.textContent = `stav: ${data.state}${data.sub_state ? " / " + data.sub_state : ""} · ${new Date().toLocaleTimeString()}`;
+      render();
+    } catch (error) {
+      state.textContent = `výpis se nepodařilo načíst (${error.message})`;
+    }
+  };
+  const schedule = () => {
+    clearInterval(timer);
+    if (follow.checked) timer = setInterval(() => { if (!document.hidden) load(); }, 3000);
+  };
+
+  service.value = recall("meshcomLogService") || service.value;
+  traffic.checked = recall("meshcomLogTraffic") === "on";
+  for (const link of document.querySelectorAll("[data-log-service]")) {
+    link.addEventListener("click", () => { service.value = link.dataset.logService; service.dispatchEvent(new Event("change")); });
+  }
+  service.addEventListener("change", () => { remember("meshcomLogService", service.value); load(); });
+  lines.addEventListener("change", load);
+  traffic.addEventListener("change", () => { remember("meshcomLogTraffic", traffic.checked ? "on" : "off"); render(); });
+  follow.addEventListener("change", schedule);
+  output.scrollTop = output.scrollHeight;
+  load();
+  schedule();
+})();
+</script>
 {% endblock %}

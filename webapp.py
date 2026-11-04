@@ -746,10 +746,30 @@ def bpq():
             "delay": cfg.get(f"{service}_delay", 0),
         })
     return render_template(
-        "bpq.html", cfg=cfg, services=services, tncs=bpq_services.TNCS,
+        "bpq.html", cfg=cfg, services=services, tncs=bpq_services.TNCS, log_lines=BPQ_LOG_LINES,
         bandwidths=bpq_services.BANDWIDTHS,
         bpq_web_url=f"http://{request.host.split(':')[0]}:{cfg.get('linbpq_web_port', 8008)}/",
     )
+
+
+BPQ_LOG_LINES = (50, 200, 500)
+
+
+@app.route("/bpq/log")
+@requires_auth
+def bpq_log():
+    """Journal of one TNC/LinBPQ service for the live log panel on the BPQ tab."""
+    service = request.args.get("service", "")
+    if service not in bpq_services.SERVICES:
+        abort(400, description="Neznámá služba.")
+    try:
+        lines = int(request.args.get("lines", BPQ_LOG_LINES[1]))
+    except ValueError:
+        lines = BPQ_LOG_LINES[1]
+    lines = max(1, min(lines, BPQ_LOG_LINES[-1]))
+    status = bpq_services.status(service)
+    return {"service": service, "state": status["state"], "sub_state": status["sub_state"],
+            "log": bpq_services.recent_log(service, lines)}
 
 
 @app.route("/updates", methods=["GET", "POST"])

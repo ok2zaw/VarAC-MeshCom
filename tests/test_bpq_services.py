@@ -118,6 +118,44 @@ class BpqServicesTests(unittest.TestCase):
         self.assertEqual(accepted.status_code, 302)
         start.assert_called_once_with("tnc2")
 
+    def test_unit_log_reads_user_units_from_system_journal(self):
+        calls = []
+
+        def journal(arguments, check=True, timeout=20):
+            calls.append(arguments)
+            if arguments[1].startswith("--user-unit="):
+                return radio_apps.subprocess.CompletedProcess(arguments, 0, "LoRa RX[-90dBm]\n", "")
+            return radio_apps.subprocess.CompletedProcess(arguments, 1, "", "No journal files were found.")
+
+        with patch.object(radio_apps, "_run", side_effect=journal):
+            self.assertEqual(radio_apps.unit_log("meshcom-tnc1.service", 5), "LoRa RX[-90dBm]")
+        self.assertEqual(calls[0][:3], ["journalctl", "--user-unit=meshcom-tnc1.service", "-n"])
+
+        hidden = radio_apps.subprocess.CompletedProcess(
+            [], 0, "-- No entries --\n", "Hint: You are currently not seeing messages from other users and the system.")
+        with patch.object(radio_apps, "_run", return_value=hidden):
+            self.assertIn("systemd-journal", radio_apps.unit_log("meshcom-tnc1.service"))
+        empty = radio_apps.subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(radio_apps, "_run", return_value=empty):
+            self.assertEqual(radio_apps.unit_log("meshcom-tnc1.service"), "")
+
+    def test_web_log_endpoint_and_crash_loop_state(self):
+        crashing = {"state": "activating", "sub_state": "auto-restart", "since": "", "enabled": "enabled",
+                    "error": None}
+        with patch.object(webapp.common, "load_config", return_value={**self.cfg, "web_password": ""}), \
+             patch.object(webapp.bpq_services, "status", return_value=crashing), \
+             patch.object(webapp.bpq_services, "recent_log", return_value="RuntimeError: GPIO") as recent_log:
+            client = webapp.app.test_client()
+            page = client.get("/bpq").get_data(as_text=True)
+            data = client.get("/bpq/log?service=tnc1&lines=9999").get_json()
+            bad = client.get("/bpq/log?service=shell")
+        self.assertIn("Padá, restartuje se", page)
+        self.assertIn('data-log-service="tnc1"', page)
+        self.assertEqual(data, {"service": "tnc1", "state": "activating", "sub_state": "auto-restart",
+                                "log": "RuntimeError: GPIO"})
+        recent_log.assert_called_with("tnc1", 500)
+        self.assertEqual(bad.status_code, 400)
+
     def test_web_save_reports_validation_errors(self):
         form = {f"{tnc}_{field}": str(self.cfg[f"{tnc}_{field}"])
                 for tnc in bpq_services.TNCS for field in webapp.BPQ_TNC_FIELDS}
