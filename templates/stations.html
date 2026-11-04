@@ -170,6 +170,17 @@
   // Known positions by callsign; the own node closes every path.
   const positions = new Map(stations.map((s) => [s.station, [s.latitude, s.longitude]]));
   if (own) positions.set(ownCall, [own.latitude, own.longitude]);
+
+  // The view must be set before any vector layer is added; Leaflet 1.9 fails to draw
+  // (Bounds.intersects on undefined) when lines are added to a map without a view.
+  const bounds = [...positions.values()];
+  if (bounds.length === 0) {
+    map.setView([49.8, 15.5], 7);
+  } else if (bounds.length === 1) {
+    map.setView(bounds[0], 11);
+  } else {
+    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 13 });
+  }
   const pathOf = (sourcePath) => {
     const path = sourcePath.split(",");
     if (own) path.push(ownCall);
@@ -226,11 +237,8 @@
       () => ({ color: "#1f5fbf", weight: 4, opacity: 0.85 }));
   };
 
-  const bounds = [];
   if (own) {
-    const point = [own.latitude, own.longitude];
-    bounds.push(point);
-    L.circleMarker(point, { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
+    L.circleMarker([own.latitude, own.longitude], { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
       .addTo(map).bindPopup(
         `<strong>${esc(ownCall)}</strong><br>vlastní uzel – ` +
         `${own.source === "manual" ? "poloha nastavená v mapě" : "poloha z majáku uzlu"}<br>` +
@@ -238,7 +246,6 @@
   }
   for (const s of stations) {
     const point = [s.latitude, s.longitude];
-    bounds.push(point);
     const color = s.direct ? signalColor(s.rssi) : "#8a8a8a";
     const fade = s.presence === "gone" ? 0.35 : 1;
     const signal = s.rssi != null ? `${s.rssi} dBm${s.snr != null ? ` / ${s.snr} dB` : ""}` : "—";
@@ -261,14 +268,6 @@
       `<br><a href="${esc(s.url)}">historie →</a>`
     ).on("popupopen", () => selectStation(s.station)).on("popupclose", () => selectStation(null));
   }
-  if (bounds.length === 0) {
-    map.setView([49.8, 15.5], 7);
-  } else if (bounds.length === 1) {
-    map.setView(bounds[0], 11);
-  } else {
-    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 13 });
-  }
-
   const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (error) {} };
   const recall = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
 
