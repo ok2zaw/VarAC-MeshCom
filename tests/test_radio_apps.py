@@ -148,14 +148,30 @@ class RadioAppsTests(unittest.TestCase):
         self.assertIn("VarAC".encode(), response.data)
         self.assertIn("log line".encode(), response.data)
 
-    def test_radio_page_links_running_mercury_gui(self):
-        cfg = {**self.cfg, "web_password": "", "radio_mercury_gui": True, "radio_mercury_gui_port": 10080}
-        with patch.object(webapp.common, "load_config", return_value=cfg),              patch.object(webapp.radio_apps, "status",
-                          return_value={"state": "active", "sub_state": "running", "since": "dnes", "error": None}),              patch.object(webapp.radio_apps, "recent_log", return_value=""):
-            response = webapp.app.test_client().get("/radio", base_url="http://192.168.1.20:8899")
-        self.assertIn(b"http://192.168.1.20:10080/mercury.html", response.data)
-        self.assertIn(b"waterfall.html", response.data)
+    def _radio_page(self, cfg, listening):
+        with patch.object(webapp.common, "load_config", return_value={**self.cfg, "web_password": "", **cfg}), \
+             patch.object(webapp.radio_apps, "status",
+                          return_value={"state": "active", "sub_state": "running", "since": "dnes", "error": None}), \
+             patch.object(webapp.radio_apps, "recent_log", return_value=""), \
+             patch.object(webapp, "port_listening", return_value=listening) as port_listening:
+            page = webapp.app.test_client().get("/radio", base_url="http://192.168.1.20:8899").get_data(as_text=True)
+        return page, port_listening
 
+    def test_radio_page_links_running_mercury_gui(self):
+        page, port_listening = self._radio_page({"radio_mercury_gui": True, "radio_mercury_gui_port": 10080}, True)
+        port_listening.assert_called_once_with(10080)
+        self.assertIn('class="button-link" href="http://192.168.1.20:10080/mercury.html"', page)
+        self.assertIn("waterfall.html", page)
+
+    def test_radio_page_explains_missing_mercury_gui(self):
+        page, _ = self._radio_page({"radio_mercury_gui": True, "radio_mercury_gui_port": 10080}, False)
+        self.assertNotIn("button-link", page)
+        self.assertIn("neodpovídá", page)
+
+        page, port_listening = self._radio_page({"radio_mercury_gui": False}, True)
+        port_listening.assert_not_called()
+        self.assertNotIn("button-link", page)
+        self.assertIn('href="#mercury-gui"', page)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,14 +6,21 @@
 <section class="send-panel" id="send-message" aria-labelledby="send-heading">
   <div class="send-panel-heading">
     <h2 id="send-heading">Odeslat zprávu</h2>
-    <p class="card-sub">Cílová skupina: <strong>{{ cfg.mesh_group }}</strong></p>
+    <p class="card-sub">Výchozí skupina z nastavení: <strong>{{ cfg.mesh_group }}</strong></p>
   </div>
   <form method="post" action="{{ url_for('send_message') }}" class="send-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="mesh-group">Cílová skupina</label>
+    <input id="mesh-group" class="send-group" name="group" value="{{ send_group }}" required
+           inputmode="numeric" pattern="[0-9]{1,5}" maxlength="5" list="mesh-known-groups"
+           title="Číslo skupiny, 1 až 5 číslic">
+    <datalist id="mesh-known-groups">
+      {% for group in known_groups %}<option value="{{ group }}">{% endfor %}
+    </datalist>
     <label for="mesh-message">Text zprávy</label>
     <textarea id="mesh-message" name="message" rows="3" maxlength="{{ max_length }}" required></textarea>
     <div class="send-form-footer">
-      <span class="hint">Zbývá <span id="mesh-message-left">{{ max_length }}</span> z {{ max_length }} bajtů (písmena s diakritikou zabírají 2). Odesílá se přímo do skupiny.</span>
+      <span class="hint">Zbývá <span id="mesh-message-left">{{ max_length }}</span> z {{ max_length }} bajtů (písmena s diakritikou zabírají 2).</span>
       <button type="submit">Odeslat do MeshCom</button>
     </div>
   </form>

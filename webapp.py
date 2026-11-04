@@ -24,6 +24,7 @@ recommended if the Pi is reachable from outside your LAN).
 import hmac
 import ipaddress
 import os
+import re
 import secrets
 import socket
 import time
@@ -148,16 +149,25 @@ def status():
     )
 
 
+# Same group numbers as the GROUP: tag in an e-mail subject.
+SEND_GROUP = re.compile(r"\d{1,5}")
+
+
 @app.route("/send", methods=["POST"])
 @requires_auth
 def send_message():
     require_csrf_token()
     cfg = common.load_config()
-    group = str(cfg.get("mesh_group", "")).strip()
+    default_group = str(cfg.get("mesh_group", "")).strip()
+    group = request.form.get("group", default_group).strip().lstrip("#")
     message = request.form.get("message", "").strip()
     max_length = gateway.mesh_text_limit(cfg)
+    # Keep a group typed by hand in the form after the redirect.
+    back = {"group": group} if group and group != default_group else {}
 
-    if not message:
+    if group and group != default_group and not SEND_GROUP.fullmatch(group):
+        flash("Skupina musí být číslo o 1 až 5 číslicích.", "error")
+    elif not message:
         flash("Zpráva nesmí být prázdná.", "error")
     elif gateway.utf8_len(message) > max_length:
         flash(f"Zpráva má {gateway.utf8_len(message)} bajtů; limit pro MeshCom je {max_length} "
@@ -178,7 +188,7 @@ def send_message():
                 "success",
             )
 
-    return redirect(url_for("messages", _anchor="send-message"))
+    return redirect(url_for("messages", **back, _anchor="send-message"))
 
 
 @app.route("/messages")
@@ -191,12 +201,17 @@ def messages():
     counts = common.count_messages()
     total_pages = max((counts["total"] + per_page - 1) // per_page, 1)
     outgoing = common.get_outgoing_messages(limit=20)
+    # Groups heard in the last 30 days, offered as suggestions in the send form.
+    known_groups = [row["channel"] for row in common.get_rf_channel_summary(time.time() - 30 * 86400, time.time())
+                    if row["kind"] == "group"]
     for row in outgoing:
         row["created_label"] = datetime.fromtimestamp(row["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
         row["status_label_time"] = datetime.fromtimestamp(row["status_at"]).strftime("%H:%M:%S")
     return render_template(
         "messages.html", rows=rows, page=page, total_pages=total_pages,
         cfg=cfg, outgoing=outgoing, max_length=gateway.mesh_text_limit(cfg),
+        send_group=request.args.get("group", "").strip() or str(cfg.get("mesh_group", "")).strip(),
+        known_groups=known_groups,
     )
 
 
@@ -448,6 +463,15 @@ def save_radio_settings(form_data, cfg):
     return new_cfg, errors
 
 
+def port_listening(port: int, host: str = "127.0.0.1") -> bool:
+    """True if something accepts TCP connections on the local port."""
+    try:
+        with socket.create_connection((host, port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
 @app.route("/radio", methods=["GET", "POST"])
 @requires_auth
 def radio():
@@ -506,11 +530,13 @@ def radio():
         or all(item["status"]["state"] == "active" for item in apps if item["name"] in {"vara", "mercury"})
     )
     mercury_gui_url = None
+    mercury_gui_listening = False
     if cfg.get("radio_mercury_gui"):
         mercury_gui_url = f"http://{request.host.split(':')[0]}:{radio_apps.mercury_gui_port(cfg)}/"
+        mercury_gui_listening = port_listening(radio_apps.mercury_gui_port(cfg))
     return render_template(
         "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
-        mercury_gui_url=mercury_gui_url,
+        mercury_gui_url=mercury_gui_url, mercury_gui_listening=mercury_gui_listening,
         port_conflict=port_conflict,
         autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
     )

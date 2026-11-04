@@ -34,13 +34,23 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	lokálně do SQLite bez automatického mazání.
 - Na stránce **UDP monitor** sledovat surové datagramy mezi uzlem a Pi a stav
 	příjmu (naslouchání na portu, chyby, IP adresa pro `--extudpip`).
-- Odeslat z webové stavové stránky provozní zprávu do nakonfigurované MeshCom
-	skupiny; délka se kontroluje a pokus se zaznamená do historie.
+- Odeslat ze stránky **Zprávy** zprávu do MeshCom skupiny. Předvyplněná je
+	skupina z nastavení, lze ji ale přepsat jiným číslem (nabízí se skupiny
+	slyšené za posledních 30 dní). Délka se kontroluje v bajtech a pokus se
+	zaznamená do historie.
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
 - Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
-	VarAC, s odkazem na webové GUI Mercury (spektrum, vodopád), včetně automatického startu po přihlášení do desktopu se zpožděním
+	VarAC, včetně automatického startu po přihlášení do desktopu se zpožděním
 	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
+- Otevřít webové GUI Mercury (spektrum, vodopád, stav spojení) tlačítkem
+	**Otevřít GUI** na kartě Mercury. Postup:
+	1. Na záložce VarAC zaškrtněte *Webové GUI Mercury* (port 10080) a uložte.
+	2. Mercury restartujte.
+	3. Tlačítko se ukáže, jakmile GUI na portu odpovídá. Jinak karta vysvětlí
+	   proč: GUI je vypnuté, nebo Mercury běží bez něj a je třeba ho restartovat.
+
+	GUI nemá přihlášení, port zpřístupněte jen v LAN/VPN.
 - Spouštět, nastavovat a sledovat dva LoRa KISS TNC (TNC1, TNC2; upravená
 	kopie IZ7BOJ ve složce `lora_tnc/`) a LinBPQ (uzel a BBS) ze záložky BPQ,
 	včetně startu po zapnutí Pi se zpožděním; BBS lze napojit na místní

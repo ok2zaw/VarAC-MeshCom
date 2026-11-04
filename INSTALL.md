@@ -937,8 +937,12 @@ v jednu chvíli jen jeden modem.
 rozhraní se spektrem, vodopádem, stavem spojení a nastavením rádia a zvuku –
 na Pi není potřeba nic doinstalovat ani mít desktop. Na záložce **VarAC**
 zaškrtněte *Webové GUI Mercury* (výchozí port `10080`), uložte a Mercury
-restartujte; na kartě Mercury se objeví odkazy **Otevřít GUI**
+restartujte; na kartě Mercury se objeví tlačítka **Otevřít GUI**
 (`http://<IP-Pi>:10080/mercury.html`) a **Vodopád** (`waterfall.html`).
+Tlačítka se ukážou jen tehdy, když na portu GUI něco opravdu naslouchá. Pokud
+Mercury běží, ale GUI neodpovídá (typicky byl spuštěn před zapnutím volby),
+karta to napíše – stačí Mercury restartovat. GUI lze otevřít i ručně
+zadáním uvedené adresy do prohlížeče.
 Samotný Mercury má výchozí port GUI `10000`; aplikace ho nastavuje na `10080`,
 protože port 10000 používá Webmin (viz kapitola 9.4).
 Vodopád a spektrum zatěžují CPU; volba *Bez vodopádu* (`-W`) je vypne.

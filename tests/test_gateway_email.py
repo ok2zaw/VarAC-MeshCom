@@ -488,6 +488,27 @@ class GatewayEmailTests(unittest.TestCase):
             "web_to_mesh", "12345", "Web → MeshCom", "Maintenance starts"
         )
 
+    def test_web_send_uses_group_from_form(self):
+        cfg = {"web_password": "", "mesh_group": "12345", "max_mesh_payload": 150}
+        with patch.object(webapp.common, "load_config", return_value=cfg), \
+             patch.object(webapp.common, "get_rf_channel_summary", return_value=[
+                 {"channel": "262", "kind": "group"}, {"channel": "*", "kind": "broadcast"}]), \
+             patch.object(webapp.gateway, "send_udp_message") as send_udp, \
+             patch.object(webapp.common, "log_message"):
+            with webapp.app.test_client() as client:
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                sent = client.post("/send", data={"csrf_token": "test-token", "group": "#262", "message": "Ahoj"})
+                rejected = client.post("/send", data={"csrf_token": "test-token", "group": "OK1AAA", "message": "Ahoj"})
+                page = client.get(sent.location).get_data(as_text=True)
+
+        send_udp.assert_called_once_with(cfg, "262", "Ahoj", source="web")
+        self.assertEqual(sent.location, "/messages?group=262#send-message")
+        self.assertEqual(rejected.location, "/messages?group=OK1AAA#send-message")
+        self.assertIn('name="group" value="262"', page)
+        self.assertIn('<option value="262">', page)
+        self.assertNotIn('<option value="*">', page)
+
     def test_web_send_rejects_oversized_message(self):
         cfg = {"web_password": "", "mesh_group": "12345", "max_mesh_payload": 5}
         with patch.object(webapp.common, "load_config", return_value=cfg), \

@@ -20,10 +20,12 @@
       {% elif item.status.since %}od {{ item.status.since }}
       {% else %}autostart {{ 'zapnutý, za ' ~ item.delay ~ ' s' if item.autostart else 'vypnutý' }}{% endif %}
     </div>
-    {% if item.name == 'mercury' and mercury_gui_url %}
+    {% if item.name == 'mercury' %}
     <div class="card-sub">
-      {% if state == 'active' %}<a class="clear-filter" href="{{ mercury_gui_url }}mercury.html" target="_blank" rel="noopener">Otevřít GUI</a>{% if not cfg.radio_mercury_no_waterfall %} · <a class="clear-filter" href="{{ mercury_gui_url }}waterfall.html" target="_blank" rel="noopener">Vodopád</a>{% endif %}
-      {% else %}GUI bude na {{ mercury_gui_url }}mercury.html{% endif %}
+      {% if not mercury_gui_url %}Webové GUI je vypnuté – zapněte <a class="clear-filter" href="#mercury-gui">Webové GUI Mercury</a> níže, uložte a Mercury restartujte.
+      {% elif mercury_gui_listening %}GUI: {{ mercury_gui_url }}mercury.html
+      {% elif state == 'active' %}GUI na portu {{ cfg.radio_mercury_gui_port }} neodpovídá – Mercury běží bez webového GUI; restartujte ho.
+      {% else %}GUI bude po spuštění na {{ mercury_gui_url }}mercury.html{% endif %}
     </div>
     {% endif %}
     <div class="radio-actions">
@@ -35,6 +37,10 @@
         <button type="submit"{% if action == 'stop' %} class="secondary"{% endif %}>{{ text }}</button>
       </form>
       {% endfor %}
+      {% if item.name == 'mercury' and mercury_gui_url and mercury_gui_listening %}
+      <a class="button-link" href="{{ mercury_gui_url }}mercury.html" target="_blank" rel="noopener">Otevřít GUI</a>
+      {% if not cfg.radio_mercury_no_waterfall %}<a class="button-link secondary" href="{{ mercury_gui_url }}waterfall.html" target="_blank" rel="noopener">Vodopád</a>{% endif %}
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -78,7 +84,7 @@
     <label>Mercury – parametry <span class="hint">(zvuk, PTT, port; aktuální port {{ mercury_port }})</span>
       <input type="text" name="radio_mercury_args" value="{{ cfg.radio_mercury_args }}" placeholder="-x alsa -i plughw:1,0 -o plughw:1,0 -p 8400">
     </label>
-    <label class="checkbox">
+    <label class="checkbox" id="mercury-gui">
       <input type="checkbox" name="radio_mercury_gui" {{ 'checked' if cfg.radio_mercury_gui }}>
       Webové GUI Mercury (spektrum, vodopád, stav; přepínač -G)
     </label>

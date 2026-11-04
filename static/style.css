@@ -184,6 +184,23 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .radio-actions button:hover { background: var(--accent-hover); }
 .radio-actions button.secondary { background: transparent; color: var(--accent-text); }
 .radio-actions button.secondary:hover { background: var(--fill-muted); }
+.radio-actions .button-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.radio-actions .button-link:hover { background: var(--accent-hover); }
+.radio-actions .button-link.secondary { background: transparent; color: var(--accent-text); }
+.radio-actions .button-link.secondary:hover { background: var(--fill-muted); }
 .config-form p.hint { margin: 0; font-size: 11px; }
 .radio-log { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
 .radio-log summary { padding: 6px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
@@ -277,6 +294,16 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
   color: var(--text);
   font: inherit;
   resize: vertical;
+}
+.send-form .send-group {
+  display: block;
+  width: 8em;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--text);
 }
 .send-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .send-form .hint { color: var(--text-muted); font-size: 11px; }
