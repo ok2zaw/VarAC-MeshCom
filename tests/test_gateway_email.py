@@ -506,6 +506,49 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual([(p["source_path"], p["observations"]) for p in paths],
                          [("OK1AAA-1,OK2RPT-9", 2), ("OK1AAA-1", 1)])
 
+    def test_last_positions_reach_before_the_period(self):
+        rows = [("OK3MID-1", "pos", 10.0, 49.0, 100.0), ("OK3MID-1", "pos", 11.0, 49.5, 300.0),
+                ("OK3MID-1", "msg", None, None, 400.0), ("OK3MID-1", "pos", 12.0, 50.0, 2000.0),
+                ("OK4NOPOS-1", "msg", None, None, 300.0)]
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            conn = common.get_db()
+            for station, kind, lon, lat, ts in rows:
+                conn.execute(
+                    "INSERT INTO station_observations (observed_at, station, heard_from, source_path, "
+                    "src_type, packet_type, latitude, longitude) VALUES (?, ?, ?, ?, 'lora', ?, ?, ?)",
+                    (ts, station, station, station, kind, lat, lon))
+            conn.commit()
+            conn.close()
+            found = common.get_last_positions({"ok3mid-1", "OK4NOPOS-1"}, until=1000)
+            self.assertEqual(common.get_last_positions(set(), until=1000), {})
+
+        self.assertEqual(list(found), ["OK3MID-1"])
+        self.assertEqual((found["OK3MID-1"]["latitude"], found["OK3MID-1"]["longitude"]), (49.5, 11.0))
+
+    def test_station_map_gets_positions_of_silent_relays(self):
+        now = time.time()
+        summary = [{"station": "OK1AAA-1", "heard_from": "OK2RPT-9", "source_path": "OK1AAA-1,OK3MID-1,OK2RPT-9",
+                    "observations": 1, "first_seen": now, "last_seen": now, "latitude": 50.0, "longitude": 14.4,
+                    "rssi": -100, "snr": 3, "altitude": None, "battery_percent": None, "last_packet_type": "pos"}]
+        paths = [{"station": "OK1AAA-1", "source_path": "OK1AAA-1,OK3MID-1,OK2RPT-9", "observations": 1,
+                  "last_seen": now}]
+        relay = {"OK3MID-1": {"station": "OK3MID-1", "latitude": 49.9, "longitude": 15.0, "observed_at": now}}
+        with patch.object(webapp.common, "load_config", return_value={"web_password": "", "callsign": "OK9NODE-1"}), \
+             patch.object(webapp.common, "get_station_summary", return_value=summary), \
+             patch.object(webapp.common, "count_station_history", return_value=0), \
+             patch.object(webapp.common, "get_station_history", return_value=[]), \
+             patch.object(webapp.common, "get_own_position", return_value=None), \
+             patch.object(webapp.common, "get_node_position", return_value=None), \
+             patch.object(webapp.common, "get_station_paths", return_value=paths), \
+             patch.object(webapp.common, "get_last_positions", return_value=relay) as last_positions:
+            page = webapp.app.test_client().get("/stations").get_data(as_text=True)
+
+        self.assertEqual(last_positions.call_args.args[0], {"OK3MID-1", "OK2RPT-9"})
+        relay_line = next(line for line in page.splitlines() if "const relayPositions =" in line)
+        self.assertIn('"station": "OK3MID-1"', relay_line)
+
     def test_station_position_form_saves_and_clears(self):
         with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
              patch.object(webapp.common, "set_manual_position") as set_position, \

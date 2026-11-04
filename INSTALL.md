@@ -720,7 +720,10 @@ prázdná:
 - **Plné čáry** jsou poslední skoky k vlastnímu uzlu, barva odpovídá RSSI.
 - **Cesty přes uzly** (přepínač pod mapou) vykreslí všechny různé cesty ze
   sloupce *Cesta* za zvolené období: původce → převaděče → vlastní uzel.
-  Úsek se zobrazí jen tam, kde oba konce znají polohu.
+  Převaděč, který v období neposlal polohu, se vykreslí na poslední známé
+  poloze z celé historie (šedý tečkovaný kroužek). Převaděč bez jakékoli polohy
+  se přeskočí a sousední stanice spojí tečkovaná čára s popiskem
+  „přes … (bez polohy)“, takže cesta zůstane souvislá.
 - Kliknutím na stanici se její cesty zvýrazní modře; v popupu jsou vypsané i
   další cesty, kterými stanice v období dorazila.
 

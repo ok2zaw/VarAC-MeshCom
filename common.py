@@ -1108,6 +1108,29 @@ def get_station_paths(since: float, until: float, limit: int = 1000) -> list[dic
         conn.close()
 
 
+def get_last_positions(stations, until: float) -> dict[str, dict]:
+    """Newest position beacon of each station before `until`, regardless of the period start.
+
+    Used for relays in a path that sent no position in the shown period.
+    """
+    stations = sorted({str(s).strip().upper() for s in stations if str(s).strip()})
+    if not stations:
+        return {}
+    conn = get_db()
+    try:
+        # SQLite returns the other columns from the row holding MAX(observed_at).
+        rows = conn.execute(
+            "SELECT station, latitude, longitude, MAX(observed_at) AS observed_at "
+            "FROM station_observations WHERE packet_type = 'pos' AND latitude IS NOT NULL "
+            f"AND longitude IS NOT NULL AND observed_at < ? AND station IN ({','.join('?' * len(stations))}) "
+            "GROUP BY station",
+            (until, *stations),
+        ).fetchall()
+        return {row["station"]: dict(row) for row in rows}
+    finally:
+        conn.close()
+
+
 def get_station_summary(since: float, until: float, limit: int = 500) -> list[dict]:
     query = """
         WITH filtered AS (

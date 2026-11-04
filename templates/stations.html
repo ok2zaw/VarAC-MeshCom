@@ -43,7 +43,8 @@
   <span class="legend-dot" style="background:#d9622b"></span>&lt; −110
   <span class="legend-dot legend-relay"></span>přes převaděč
   <span class="legend-dot legend-own"></span>vlastní uzel
-  · plná čára = poslední skok k uzlu, čárkovaná = cesty přes převaděče, modrá = cesty vybrané stanice
+  <span class="legend-dot legend-old"></span>převaděč, starší poloha
+  · plná čára = poslední skok k uzlu, čárkovaná = cesty přes převaděče, tečkovaná = přes uzel bez polohy, modrá = cesty vybrané stanice
   · 🟢 do 45 min, 🟡 do 2 h, ⚪ déle (průhledná)
   {% if not map_stations %}· v tomto období žádná stanice neposlala polohu{% endif %}
 </p>
@@ -143,6 +144,7 @@
   }
   const stations = {{ map_stations|tojson }};
   const stationPaths = {{ station_paths|tojson }};
+  const relayPositions = {{ relay_positions|tojson }};
   const own = {{ own_position|tojson }};
   const ownCall = {{ own_callsign|tojson }};
   const positionForm = {
@@ -168,7 +170,9 @@
   };
 
   // Known positions by callsign; the own node closes every path.
-  const positions = new Map(stations.map((s) => [s.station, [s.latitude, s.longitude]]));
+  // Relays silent in the period fall back to their last known beacon.
+  const positions = new Map(relayPositions.map((r) => [r.station, [r.latitude, r.longitude]]));
+  for (const s of stations) positions.set(s.station, [s.latitude, s.longitude]);
   if (own) positions.set(ownCall, [own.latitude, own.longitude]);
 
   // The view must be set before any vector layer is added; Leaflet 1.9 fails to draw
@@ -192,20 +196,25 @@
   const showDistances = (group) => group.eachLayer((line) => {
     if (distanceToggle.checked) line.openTooltip(); else line.closeTooltip();
   });
-  // Draws each segment of the given paths once; segments without both positions are skipped.
+  // Draws each segment of the given paths once. Hops without any known position are bridged:
+  // the neighbouring known stations are joined by a dotted line naming the skipped hops.
   const drawPaths = (group, paths, style) => {
     const drawn = new Set();
     for (const { path, rssi } of paths) {
-      for (let i = 0; i + 1 < path.length; i++) {
-        const from = positions.get(path[i]);
-        const to = positions.get(path[i + 1]);
-        const key = [path[i], path[i + 1]].sort().join("|");
-        if (!from || !to || drawn.has(key)) continue;
+      const known = path.map((call, index) => ({ call, index })).filter(({ call }) => positions.has(call));
+      for (let k = 0; k + 1 < known.length; k++) {
+        const a = known[k], b = known[k + 1];
+        if (a.call === b.call) continue;
+        const skipped = path.slice(a.index + 1, b.index);
+        const key = [a.call, b.call].sort().join("|") + "|" + skipped.join(",");
+        if (drawn.has(key)) continue;
         drawn.add(key);
-        L.polyline([from, to], style(i + 2 === path.length && own, rssi)).addTo(group)
-          .bindTooltip(`${distanceKm(from, to).toFixed(1)} km`, {
-            permanent: true, direction: "center", className: "map-distance",
-          });
+        const from = positions.get(a.call), to = positions.get(b.call);
+        const line = style(b.index === path.length - 1 && own, rssi);
+        if (skipped.length) Object.assign(line, { dashArray: "2 6", lineCap: "round" });
+        L.polyline([from, to], line).addTo(group).bindTooltip(
+          `${distanceKm(from, to).toFixed(1)} km` + (skipped.length ? ` · přes ${skipped.map(esc).join(", ")} (bez polohy)` : ""),
+          { permanent: true, direction: "center", className: "map-distance" });
       }
     }
     showDistances(group);
@@ -226,7 +235,7 @@
   // On demand: every distinct path heard in the period, through all relays.
   const routes = addGroup(false);
   drawPaths(routes, stationPaths.map((p) => ({ path: pathOf(p.source_path) })),
-    (lastHop) => ({ color: "#8a8a8a", weight: 1.5, opacity: 0.75, dashArray: lastHop ? null : "6 5" }));
+    (lastHop) => ({ color: "#55606e", weight: 2.5, opacity: 0.9, dashArray: lastHop ? null : "8 5" }));
 
   // Paths of the station whose popup is open.
   const selected = addGroup(true);
@@ -243,6 +252,13 @@
         `<strong>${esc(ownCall)}</strong><br>vlastní uzel – ` +
         `${own.source === "manual" ? "poloha nastavená v mapě" : "poloha z majáku uzlu"}<br>` +
         `${own.latitude.toFixed(5)}, ${own.longitude.toFixed(5)}`);
+  }
+  for (const r of relayPositions) {
+    L.circleMarker([r.latitude, r.longitude], {
+      radius: 5, color: "#8a8a8a", weight: 2, opacity: 0.6, fillColor: "#ffffff", fillOpacity: 0.6, dashArray: "2 3",
+    }).addTo(map).bindPopup(
+      `<strong>${esc(r.station)}</strong><br>převaděč v cestách, v tomto období bez polohy<br>` +
+      `poslední známá poloha: ${esc(r.last_seen_label)}`);
   }
   for (const s of stations) {
     const point = [s.latitude, s.longitude];

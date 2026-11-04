@@ -363,16 +363,28 @@ def stations():
     for row in history:
         row["observed_at_label"] = format_ts(row["observed_at"], cfg)
 
+    own_callsign = str(cfg.get("callsign", "")).strip().upper()
+    station_paths = common.get_station_paths(since, until)
+    # Relays without a position in the period: use their last known beacon so paths stay connected.
+    placed = {row["station"] for row in map_stations} | {own_callsign}
+    missing = {call for row in station_paths for call in row["source_path"].split(",")} - placed
+    relay_positions = [
+        {"station": row["station"], "latitude": row["latitude"], "longitude": row["longitude"],
+         "last_seen_label": format_ts(row["observed_at"], cfg)}
+        for row in common.get_last_positions(missing, until).values()
+    ]
+
     return render_template(
         "stations.html",
         summary=summary,
         map_stations=map_stations,
         own_position=own_position,
         node_position=common.get_node_position(),
+        relay_positions=relay_positions,
         station_paths=[{"station": row["station"], "source_path": row["source_path"],
                         "observations": row["observations"]}
-                       for row in common.get_station_paths(since, until)],
-        own_callsign=str(common.load_config().get("callsign", "")).strip().upper(),
+                       for row in station_paths],
+        own_callsign=own_callsign,
         history=history,
         history_count=history_count,
         selected_station=selected_station,
