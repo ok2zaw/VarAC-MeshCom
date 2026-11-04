@@ -262,7 +262,9 @@ class GatewayEmailTests(unittest.TestCase):
              patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
              patch.object(webapp.common, "count_station_history", return_value=0) as count_history, \
              patch.object(webapp.common, "get_station_history", return_value=[]) as history, \
-             patch.object(webapp.common, "get_own_position", return_value=None):
+             patch.object(webapp.common, "get_own_position", return_value=None), \
+             patch.object(webapp.common, "get_node_position", return_value=None), \
+             patch.object(webapp.common, "get_station_paths", return_value=[]):
             response = webapp.app.test_client().get(
                 "/stations?start=2026-10-01&end=2026-10-30&station=OK1AAA-1"
             )
@@ -317,17 +319,87 @@ class GatewayEmailTests(unittest.TestCase):
              patch.object(webapp.common, "count_station_history", return_value=0), \
              patch.object(webapp.common, "get_station_history", return_value=[]), \
              patch.object(webapp.common, "get_own_position",
-                          return_value={"latitude": 49.1951, "longitude": 16.6068, "altitude": 237}):
+                          return_value={"latitude": 49.1951, "longitude": 16.6068, "altitude": 237,
+                                        "source": "manual"}), \
+             patch.object(webapp.common, "get_node_position", return_value=None), \
+             patch.object(webapp.common, "get_station_paths", return_value=[
+                 {"station": "OK2BBB-2", "source_path": "OK2BBB-2,OK2RPT-9", "observations": 1,
+                  "last_seen": 0}]):
             page = webapp.app.test_client().get("/stations").get_data(as_text=True)
 
         self.assertIn('id="station-map"', page)
         self.assertIn('"station": "OK1AAA-1"', page)
         self.assertIn('"direct": true', page)
-        self.assertNotIn('"station": "OK2BBB-2"', page)   # no position, table only
+        stations_json = next(line for line in page.splitlines() if "const stations =" in line)
+        self.assertNotIn('"station": "OK2BBB-2"', stations_json)   # no position, table only
         self.assertIn("184.3 km", page)
         self.assertIn('"presence": "gone"', page)   # last_seen 0 = long ago
         self.assertIn('title="pryč – před', page)
         self.assertIn("leaflet@1.9.4", page)
+        self.assertIn('"source_path": "OK2BBB-2,OK2RPT-9"', page)   # routes layer data
+        self.assertIn('id="map-routes"', page)
+        self.assertIn("poloha uzlu: ruční 49.19510, 16.60680", page)
+        self.assertIn('value="clear"', page)
+
+    def test_manual_position_overrides_node_beacon(self):
+        beacon = {"src_type": "node", "type": "pos", "src": "OK9NODE-1", "lat": 49.1951,
+                  "lat_dir": "N", "long": 16.6068, "long_dir": "E"}
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            common.record_own_position(beacon, "OK9NODE-1")
+            self.assertEqual(common.get_own_position()["source"], "node")
+            with self.assertRaises(ValueError):
+                common.set_manual_position(91, 14)
+            with self.assertRaises(ValueError):
+                common.set_manual_position("", 14)
+            common.set_manual_position("50.07551234", "14.4378")
+            common.record_own_position({**beacon, "lat": 48.0}, "OK9NODE-1")   # newer beacon
+            manual = common.get_own_position()
+            common.clear_manual_position()
+            node = common.get_own_position()
+
+        self.assertEqual((manual["source"], manual["latitude"], manual["longitude"]), ("manual", 50.075512, 14.4378))
+        self.assertEqual((node["source"], node["latitude"]), ("node", 48.0))
+
+    def test_station_paths_group_distinct_routes(self):
+        rows = [("OK1AAA-1", "OK1AAA-1,OK2RPT-9", 100.0), ("OK1AAA-1", "OK1AAA-1,OK2RPT-9", 200.0),
+                ("OK1AAA-1", "OK1AAA-1", 150.0), ("OK1AAA-1", "OK1AAA-1", 5000.0)]
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            conn = common.get_db()
+            for station, path, ts in rows:
+                conn.execute(
+                    "INSERT INTO station_observations (observed_at, station, heard_from, source_path, "
+                    "src_type, packet_type) VALUES (?, ?, ?, ?, 'lora', 'pos')",
+                    (ts, station, path.split(",")[-1], path))
+            conn.commit()
+            conn.close()
+            paths = common.get_station_paths(0, 1000)
+
+        self.assertEqual([(p["source_path"], p["observations"]) for p in paths],
+                         [("OK1AAA-1,OK2RPT-9", 2), ("OK1AAA-1", 1)])
+
+    def test_station_position_form_saves_and_clears(self):
+        with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
+             patch.object(webapp.common, "set_manual_position") as set_position, \
+             patch.object(webapp.common, "clear_manual_position") as clear_position:
+            with webapp.app.test_client() as client:
+                rejected = client.post("/stations/position", data={"latitude": "50", "longitude": "14"})
+                with client.session_transaction() as browser_session:
+                    browser_session["_csrf_token"] = "test-token"
+                saved = client.post("/stations/position", data={
+                    "csrf_token": "test-token", "action": "set", "latitude": "50.1", "longitude": "14.2",
+                    "start": "2026-11-01", "end": "2026-11-04"})
+                cleared = client.post("/stations/position", data={"csrf_token": "test-token", "action": "clear"})
+
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(saved.status_code, 302)
+        self.assertIn("/stations?start=2026-11-01&end=2026-11-04#station-map-heading", saved.headers["Location"])
+        set_position.assert_called_once_with("50.1", "14.2")
+        self.assertEqual(cleared.status_code, 302)
+        clear_position.assert_called_once_with()
 
     def test_station_observations_store_rf_position_signal_and_telemetry(self):
         with tempfile.TemporaryDirectory() as tmpdir:

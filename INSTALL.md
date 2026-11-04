@@ -674,6 +674,21 @@ prázdná:
      "SELECT COUNT(*), datetime(MAX(observed_at),'unixepoch','localtime') FROM station_observations;"
    ```
 
+#### Mapa stanic
+
+- **Poloha vlastního uzlu** se bere z jeho majáku (`pos` se `src_type` =
+  `node`). Pokud uzel polohu neposílá (nemá GPS ani pevné souřadnice), nebo je
+  nepřesná, zapněte pod mapou *nastavit polohu uzlu kliknutím*, klikněte do
+  mapy a potvrďte *Uložit jako polohu …*. Ruční poloha má přednost před
+  majákem a od ní se počítají všechny vzdálenosti; odkazem *zrušit* se vrátíte
+  k poloze z majáku. Do uzlu se nic neposílá – ukládá se jen v databázi gateway.
+- **Plné čáry** jsou poslední skoky k vlastnímu uzlu, barva odpovídá RSSI.
+- **Cesty přes uzly** (přepínač pod mapou) vykreslí všechny různé cesty ze
+  sloupce *Cesta* za zvolené období: původce → převaděče → vlastní uzel.
+  Úsek se zobrazí jen tam, kde oba konce znají polohu.
+- Kliknutím na stanici se její cesty zvýrazní modře; v popupu jsou vypsané i
+  další cesty, kterými stanice v období dorazila.
+
 ### 9.4 Síťové porty a souběh s dalšími službami
 
 | Port | Služba | Poznámka |

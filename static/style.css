@@ -219,6 +219,12 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 @media (max-width: 640px) { .station-map { height: 300px; } }
 .map-toggle { margin-left: 12px; white-space: nowrap; }
 .map-toggle input { vertical-align: -2px; }
+.map-legend:has(+ .map-controls) { margin-bottom: 0.4rem; }
+.map-controls .map-toggle:first-child { margin-left: 0; }
+.inline-form { display: inline; }
+.link-button { padding: 0; border: 0; background: none; color: var(--accent-text); font: inherit; text-decoration: underline; cursor: pointer; }
+.station-map.map-picking { cursor: crosshair; }
+.map-pick-form button { margin-top: 6px; }
 .leaflet-tooltip.map-distance { padding: 0 4px; border: 0; border-radius: 3px; background: rgba(255, 255, 255, 0.85); box-shadow: none; color: #333; font-size: 10px; font-weight: 600; }
 .leaflet-tooltip.map-distance::before { display: none; }
 .presence { cursor: help; }

@@ -318,6 +318,10 @@ def stations():
         summary=summary,
         map_stations=map_stations,
         own_position=own_position,
+        node_position=common.get_node_position(),
+        station_paths=[{"station": row["station"], "source_path": row["source_path"],
+                        "observations": row["observations"]}
+                       for row in common.get_station_paths(since, until)],
         own_callsign=str(common.load_config().get("callsign", "")).strip().upper(),
         history=history,
         history_count=history_count,
@@ -325,6 +329,24 @@ def stations():
         start_date=start_day.isoformat(),
         end_date=end_day.isoformat(),
     )
+
+
+@app.route("/stations/position", methods=["POST"])
+@requires_auth
+def station_position():
+    require_csrf_token()
+    back = {key: request.form[key] for key in ("start", "end") if request.form.get(key)}
+    if request.form.get("action") == "clear":
+        common.clear_manual_position()
+        flash("Ruční poloha zrušena; vzdálenosti se měří od polohy z majáku uzlu.", "success")
+    else:
+        try:
+            common.set_manual_position(request.form.get("latitude", ""), request.form.get("longitude", ""))
+        except ValueError:
+            flash("Neplatné souřadnice.", "error")
+        else:
+            flash("Poloha uzlu uložena; vzdálenosti se měří od ní.", "success")
+    return redirect(url_for("stations", **back, _anchor="station-map-heading"))
 
 
 @app.route("/config", methods=["GET", "POST"])

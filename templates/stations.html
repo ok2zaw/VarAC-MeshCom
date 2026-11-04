@@ -36,7 +36,6 @@
 </form>
 
 <h2 id="station-map-heading">Mapa</h2>
-{% if map_stations or own_position %}
 <div id="station-map" class="station-map" aria-labelledby="station-map-heading"></div>
 <p class="map-legend">
   <span class="legend-dot" style="background:#2e9d4f"></span>RSSI ≥ −95 dBm
@@ -44,14 +43,29 @@
   <span class="legend-dot" style="background:#d9622b"></span>&lt; −110
   <span class="legend-dot legend-relay"></span>přes převaděč
   <span class="legend-dot legend-own"></span>vlastní uzel
-  · plná čára = poslední skok k uzlu, čárkovaná = dřívější skoky
+  · plná čára = poslední skok k uzlu, čárkovaná = cesty přes převaděče, modrá = cesty vybrané stanice
   · 🟢 do 45 min, 🟡 do 2 h, ⚪ déle (průhledná)
-  {% if not own_position %}· poloha vlastního uzlu zatím nepřišla (uzel ji posílá s majákem){% endif %}
-  <label class="map-toggle"><input type="checkbox" id="map-distances" checked> vzdálenosti</label>
+  {% if not map_stations %}· v tomto období žádná stanice neposlala polohu{% endif %}
 </p>
-{% else %}
-<p class="card-sub">V tomto období žádná stanice neposlala polohu.</p>
-{% endif %}
+<p class="map-legend map-controls">
+  <label class="map-toggle"><input type="checkbox" id="map-distances" checked> vzdálenosti</label>
+  <label class="map-toggle"><input type="checkbox" id="map-routes"> cesty přes uzly</label>
+  <label class="map-toggle"><input type="checkbox" id="map-pick"> nastavit polohu uzlu kliknutím</label>
+  ·
+  {% if own_position and own_position.source == 'manual' %}
+    poloha uzlu: ruční {{ '%.5f'|format(own_position.latitude) }}, {{ '%.5f'|format(own_position.longitude) }}
+    <form method="post" action="{{ url_for('station_position') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="start" value="{{ start_date }}">
+      <input type="hidden" name="end" value="{{ end_date }}">
+      <button type="submit" name="action" value="clear" class="link-button">zrušit{% if node_position %} a použít maják uzlu{% endif %}</button>
+    </form>
+  {% elif own_position %}
+    poloha uzlu: z majáku {{ '%.5f'|format(own_position.latitude) }}, {{ '%.5f'|format(own_position.longitude) }}
+  {% else %}
+    poloha uzlu zatím není známa (uzel ji posílá s majákem, nebo ji nastavte kliknutím do mapy)
+  {% endif %}
+</p>
 
 <h2>Stanice v období</h2>
 <div class="table-wrap">
@@ -120,7 +134,6 @@
   </table>
 </div>
 
-{% if map_stations or own_position %}
 <script>
 (() => {
   const container = document.getElementById("station-map");
@@ -129,8 +142,15 @@
     return;
   }
   const stations = {{ map_stations|tojson }};
+  const stationPaths = {{ station_paths|tojson }};
   const own = {{ own_position|tojson }};
   const ownCall = {{ own_callsign|tojson }};
+  const positionForm = {
+    action: {{ url_for('station_position')|tojson }},
+    csrf: {{ csrf_token()|tojson }},
+    start: {{ start_date|tojson }},
+    end: {{ end_date|tojson }},
+  };
   const map = L.map(container, { scrollWheelZoom: false });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 18,
@@ -150,37 +170,71 @@
   // Known positions by callsign; the own node closes every path.
   const positions = new Map(stations.map((s) => [s.station, [s.latitude, s.longitude]]));
   if (own) positions.set(ownCall, [own.latitude, own.longitude]);
-
-  // Links along each station's RF path: origin -> relays -> heard_from -> own node.
-  // The last hop is what this node received, so it carries the RSSI colour.
-  const links = L.layerGroup().addTo(map);
-  const drawn = new Set();
-  const ordered = [...stations].sort((a, b) => Number(b.direct) - Number(a.direct));
-  for (const s of ordered) {
-    const path = s.source_path.split(",");
+  const pathOf = (sourcePath) => {
+    const path = sourcePath.split(",");
     if (own) path.push(ownCall);
-    for (let i = 0; i + 1 < path.length; i++) {
-      const from = positions.get(path[i]);
-      const to = positions.get(path[i + 1]);
-      const key = [path[i], path[i + 1]].sort().join("|");
-      if (!from || !to || drawn.has(key)) continue;
-      drawn.add(key);
-      const lastHop = i + 2 === path.length && own;
-      const color = lastHop ? signalColor(s.rssi) : "#8a8a8a";
-      L.polyline([from, to], {
-        color, weight: lastHop ? 2.5 : 1.5, opacity: 0.75, dashArray: lastHop ? null : "6 5",
-      }).addTo(links).bindTooltip(`${distanceKm(from, to).toFixed(1)} km`, {
-        permanent: true, direction: "center", className: "map-distance",
-      });
+    return path;
+  };
+
+  const distanceToggle = document.getElementById("map-distances");
+  const lineGroups = [];
+  const showDistances = (group) => group.eachLayer((line) => {
+    if (distanceToggle.checked) line.openTooltip(); else line.closeTooltip();
+  });
+  // Draws each segment of the given paths once; segments without both positions are skipped.
+  const drawPaths = (group, paths, style) => {
+    const drawn = new Set();
+    for (const { path, rssi } of paths) {
+      for (let i = 0; i + 1 < path.length; i++) {
+        const from = positions.get(path[i]);
+        const to = positions.get(path[i + 1]);
+        const key = [path[i], path[i + 1]].sort().join("|");
+        if (!from || !to || drawn.has(key)) continue;
+        drawn.add(key);
+        L.polyline([from, to], style(i + 2 === path.length && own, rssi)).addTo(group)
+          .bindTooltip(`${distanceKm(from, to).toFixed(1)} km`, {
+            permanent: true, direction: "center", className: "map-distance",
+          });
+      }
     }
-  }
+    showDistances(group);
+  };
+  const addGroup = (onMap) => {
+    const group = L.layerGroup();
+    if (onMap) group.addTo(map);
+    lineGroups.push(group);
+    return group;
+  };
+
+  // Always shown: the last hop of every station's latest path, coloured by what this node received.
+  // Directly heard stations go first, so a relay's link carries the relay's own RSSI.
+  const lastHops = addGroup(true);
+  if (own) drawPaths(lastHops, [...stations].sort((a, b) => Number(b.direct) - Number(a.direct)).map((s) => ({ path: pathOf(s.source_path).slice(-2), rssi: s.rssi })),
+    (_, rssi) => ({ color: signalColor(rssi), weight: 2.5, opacity: 0.75 }));
+
+  // On demand: every distinct path heard in the period, through all relays.
+  const routes = addGroup(false);
+  drawPaths(routes, stationPaths.map((p) => ({ path: pathOf(p.source_path) })),
+    (lastHop) => ({ color: "#8a8a8a", weight: 1.5, opacity: 0.75, dashArray: lastHop ? null : "6 5" }));
+
+  // Paths of the station whose popup is open.
+  const selected = addGroup(true);
+  const selectStation = (station) => {
+    selected.clearLayers();
+    if (!station) return;
+    drawPaths(selected, stationPaths.filter((p) => p.station === station).map((p) => ({ path: pathOf(p.source_path) })),
+      () => ({ color: "#1f5fbf", weight: 4, opacity: 0.85 }));
+  };
 
   const bounds = [];
   if (own) {
     const point = [own.latitude, own.longitude];
     bounds.push(point);
     L.circleMarker(point, { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
-      .addTo(map).bindPopup(`<strong>${esc(ownCall)}</strong><br>vlastní uzel`);
+      .addTo(map).bindPopup(
+        `<strong>${esc(ownCall)}</strong><br>vlastní uzel – ` +
+        `${own.source === "manual" ? "poloha nastavená v mapě" : "poloha z majáku uzlu"}<br>` +
+        `${own.latitude.toFixed(5)}, ${own.longitude.toFixed(5)}`);
   }
   for (const s of stations) {
     const point = [s.latitude, s.longitude];
@@ -188,6 +242,7 @@
     const color = s.direct ? signalColor(s.rssi) : "#8a8a8a";
     const fade = s.presence === "gone" ? 0.35 : 1;
     const signal = s.rssi != null ? `${s.rssi} dBm${s.snr != null ? ` / ${s.snr} dB` : ""}` : "—";
+    const otherPaths = stationPaths.filter((p) => p.station === s.station && p.source_path !== s.source_path);
     L.circleMarker(point, {
       radius: 7, color, weight: 2, opacity: fade,
       fillColor: color, fillOpacity: (s.direct ? 0.85 : 0.35) * fade,
@@ -196,32 +251,64 @@
       `<strong>${esc(s.presence_icon)} ${esc(s.station)}</strong><br>` +
       `${esc(s.presence_label)} – ${esc(s.age_label)}<br>` +
       `${s.direct ? "slyšeno napřímo" : "přes " + esc(s.heard_from)}<br>` +
-      `cesta: ${esc(s.source_path)}<br>` +
-      `signál: ${esc(signal)}` +
+      `cesta: ${esc(s.source_path)}` +
+      (otherPaths.length ? `<br>další cesty: ${otherPaths.map((p) => esc(p.source_path)).join("; ")}` : "") +
+      `<br>signál: ${esc(signal)}` +
       (s.distance_km != null ? `<br>vzdálenost: ${esc(s.distance_km)} km` : "") +
       (s.altitude != null ? `<br>výška (raw): ${esc(s.altitude)}` : "") +
       (s.battery_percent != null ? `<br>baterie: ${esc(s.battery_percent)} %` : "") +
       `<br>naposledy: ${esc(s.last_seen_label)} · rámců ${esc(s.observations)}` +
       `<br><a href="${esc(s.url)}">historie →</a>`
-    );
+    ).on("popupopen", () => selectStation(s.station)).on("popupclose", () => selectStation(null));
   }
-  if (bounds.length === 1) {
+  if (bounds.length === 0) {
+    map.setView([49.8, 15.5], 7);
+  } else if (bounds.length === 1) {
     map.setView(bounds[0], 11);
   } else {
     map.fitBounds(bounds, { padding: [24, 24], maxZoom: 13 });
   }
 
-  const toggle = document.getElementById("map-distances");
-  const showDistances = (show) => links.eachLayer((line) => {
-    if (show) line.openTooltip(); else line.closeTooltip();
+  const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (error) {} };
+  const recall = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
+
+  distanceToggle.checked = recall("meshcomMapDistances") !== "off";
+  lineGroups.forEach(showDistances);
+  distanceToggle.addEventListener("change", () => {
+    lineGroups.forEach(showDistances);
+    remember("meshcomMapDistances", distanceToggle.checked ? "on" : "off");
   });
-  try { toggle.checked = localStorage.getItem("meshcomMapDistances") !== "off"; } catch (error) {}
-  showDistances(toggle.checked);
-  toggle.addEventListener("change", () => {
-    showDistances(toggle.checked);
-    try { localStorage.setItem("meshcomMapDistances", toggle.checked ? "on" : "off"); } catch (error) {}
+
+  const routeToggle = document.getElementById("map-routes");
+  const showRoutes = () => {
+    if (routeToggle.checked) { routes.addTo(map); showDistances(routes); } else { routes.remove(); }
+  };
+  routeToggle.checked = recall("meshcomMapRoutes") === "on";
+  showRoutes();
+  routeToggle.addEventListener("change", () => {
+    showRoutes();
+    remember("meshcomMapRoutes", routeToggle.checked ? "on" : "off");
+  });
+
+  // Picking the own position: only while the checkbox is on, so a stray click saves nothing.
+  const pickToggle = document.getElementById("map-pick");
+  pickToggle.addEventListener("change", () => container.classList.toggle("map-picking", pickToggle.checked));
+  map.on("click", (event) => {
+    if (!pickToggle.checked) return;
+    const lat = event.latlng.lat.toFixed(6);
+    const lng = event.latlng.wrap().lng.toFixed(6);
+    L.popup().setLatLng(event.latlng).setContent(
+      `<form method="post" action="${esc(positionForm.action)}" class="map-pick-form">` +
+      `<input type="hidden" name="csrf_token" value="${esc(positionForm.csrf)}">` +
+      `<input type="hidden" name="start" value="${esc(positionForm.start)}">` +
+      `<input type="hidden" name="end" value="${esc(positionForm.end)}">` +
+      `<input type="hidden" name="latitude" value="${lat}">` +
+      `<input type="hidden" name="longitude" value="${lng}">` +
+      `<strong>${lat}, ${lng}</strong><br>` +
+      `<button type="submit" name="action" value="set">Uložit jako polohu ${esc(ownCall || "uzlu")}</button>` +
+      `</form>`
+    ).openOn(map);
   });
 })();
 </script>
-{% endif %}
 {% endblock %}

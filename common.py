@@ -273,6 +273,16 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS manual_position (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS outgoing_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at REAL NOT NULL,
@@ -573,11 +583,54 @@ def record_own_position(packet: dict, own_callsign: str = "") -> bool:
         conn.close()
 
 
-def get_own_position() -> dict | None:
+def get_node_position() -> dict | None:
+    """Position from the own node's beacon (None until one arrives)."""
     conn = get_db()
     try:
         row = conn.execute("SELECT * FROM node_position WHERE id = 1").fetchone()
-        return dict(row) if row else None
+        return dict(row) | {"source": "node"} if row else None
+    finally:
+        conn.close()
+
+
+def get_manual_position() -> dict | None:
+    """Position picked on the station map (None if not set)."""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM manual_position WHERE id = 1").fetchone()
+        return dict(row) | {"altitude": None, "source": "manual"} if row else None
+    finally:
+        conn.close()
+
+
+def get_own_position() -> dict | None:
+    """Reference point for the map and distances: the map pick wins over the node beacon."""
+    return get_manual_position() or get_node_position()
+
+
+def set_manual_position(latitude: float, longitude: float) -> None:
+    latitude, longitude = float(latitude), float(longitude)
+    if not (math.isfinite(latitude) and math.isfinite(longitude)
+            and -90 <= latitude <= 90 and -180 <= longitude <= 180):
+        raise ValueError("Souřadnice jsou mimo rozsah.")
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO manual_position (id, latitude, longitude, updated_at) VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET latitude=excluded.latitude, "
+            "longitude=excluded.longitude, updated_at=excluded.updated_at",
+            (round(latitude, 6), round(longitude, 6), time.time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_manual_position() -> None:
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM manual_position WHERE id = 1")
+        conn.commit()
     finally:
         conn.close()
 
@@ -979,6 +1032,21 @@ def count_heard_rf_messages(since: float, until: float, channel: str = "", kind:
     conn = get_db()
     try:
         return conn.execute(query, params).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def get_station_paths(since: float, until: float, limit: int = 1000) -> list[dict]:
+    """Distinct RF paths (origin,relays...,heard_from) per station in the period, newest first."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT station, source_path, COUNT(*) AS observations, MAX(observed_at) AS last_seen "
+            "FROM station_observations WHERE observed_at >= ? AND observed_at < ? "
+            "GROUP BY station, source_path ORDER BY last_seen DESC LIMIT ?",
+            (since, until, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
     finally:
         conn.close()
 

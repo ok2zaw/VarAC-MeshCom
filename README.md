@@ -25,6 +25,8 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	musí být ExtUDP zapnuté (`--extudp on`) a cílová IP nastavená na Raspberry Pi
 	(`--extudpip <IP-Raspberry-Pi>`). Formát paketů popisuje [MeshCom ExtUDP
 	reference](https://docs.aprscaching.org/reference/meshcom-extudp/).
+	Mapa stanic ukazuje vzdálenosti od vlastního uzlu, stav 🟢/🟡/⚪ a po
+	zapnutí i cesty přes převaděče; polohu uzlu lze nastavit kliknutím do mapy.
 - Na stránce **Mesh zprávy** zobrazit všechny textové zprávy z uzlu (LoRa,
 	internetová brána i echo vlastních zpráv) roztříděné podle cíle: `*` pro
 	všechny, číselné skupiny a přímé zprávy na značku. Duplicitní opakování,
@@ -44,6 +46,73 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	včetně startu po zapnutí Pi se zpožděním; BBS lze napojit na místní
 	Postfix jako e-mailovou bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
 - Ukládat historii, chyby a heartbeat do SQLite.
+
+## Formát zpráv
+
+### E-mail → MeshCom
+
+Gateway čte nové e-maily z `maildir_new` (a volitelně nepřečtené zprávy ze
+složky `imap_folder` přes IMAP). Z každého e-mailu sestaví text:
+
+```
+<odesílatel>: <předmět> | Příloha: <názvy> - <text e-mailu>
+```
+
+- **Odesílatel** je jméno z hlavičky `From` bez adresy
+  (`Jan Novák <jan@example.net>` → `Jan Novák`). Bez jména se použije celá
+  adresa, která zabere část limitu. Nastavte si proto v klientovi krátké
+  jméno, třeba volací značku.
+- **Text** se bere z části `text/plain` a zalomení řádků i vícenásobné
+  mezery se slijí do jedné mezery. E-mail jen v HTML bez textové části dorazí
+  jako `(bez textu)`, proto posílejte prostý text.
+- **Přílohy** se neposílají, uvedou se jen první tři názvy.
+- **Délka**: jedna MeshCom zpráva má nejvýše `max_mesh_payload` znaků
+  (výchozí 150). Delší text se rozdělí na hranici slov a další části mají
+  prefix `<odesílatel>: <předmět> (pokračování) - `. Části se zatím odesílají
+  hned za sebou, bez pauzy, takže pište raději krátce.
+- Po úspěšném odeslání všech částí se e-mail přesune do `Maildir/cur`.
+
+### Cílová skupina v předmětu
+
+Bez značky jde zpráva do skupiny `mesh_group` z nastavení. Značka
+`GROUP: <číslo>` kdekoli v předmětu pošle zprávu do jiné skupiny. Velikost
+písmen nehraje roli, `#` před číslem je volitelný a číslo může mít 1–5 číslic.
+Značka i oddělovač `-` nebo `:` za ní se z předmětu odstraní. Samotné
+`Re:`/`Fwd:` bez dalšího textu se zahodí.
+
+| Předmět e-mailu | Cíl | Zpráva v MeshCom |
+|---|---|---|
+| `Schůzka` | `mesh_group` | `Jan Novák: Schůzka - Ahoj, zítra v 18:00.` |
+| `GROUP: 262` | 262 | `Jan Novák: Ahoj, zítra v 18:00.` |
+| `group:#2620 - Porucha` | 2620 | `Jan Novák: Porucha - Ahoj, zítra v 18:00.` |
+| `Re: GROUP: 9 Cvičení` | 9 | `Jan Novák: Re: Cvičení - Ahoj, zítra v 18:00.` |
+| `Re: GROUP: 9` | 9 | `Jan Novák: Ahoj, zítra v 18:00.` |
+
+Přímé zprávy na volací značku ani zprávy pro všechny (`*`) se z e-mailu zatím
+posílat nedají, cílem je vždy číselná skupina. Stav doručení každé zprávy je
+na stránce **Zprávy**. Skupiny příjemci nepotvrzují, takže tam nejvýš uvidíte,
+že zprávu uzel vysílá nebo ji slyšel soused.
+
+### MeshCom → e-mail
+
+Na `mail_to` se přeposílají jen nové textové zprávy do skupiny `mesh_group`
+od cizích stanic. Neposílají se zprávy do jiných skupin, přímé zprávy, vlastní
+zprávy (echo uzlu), duplicitní opakování, potvrzení `ack` ani časové značky
+`{CET}`. Všechny zprávy jsou ale vidět na stránce **Mesh zprávy**.
+
+```
+Předmět: [MeshCom 262] OK1AAA-1,OK2RPT-9
+From: OK1AAA-1,OK2RPT-9
+Group: 262
+
+<text zprávy bez pořadového čísla {NNN}>
+```
+
+Odesílatel obsahuje i cestu přes převaděče, jak ji ohlásil uzel. Když
+odpověď dorazí do schránky, kterou gateway čte, zpracuje se jako každý jiný
+e-mail. Předmět `Re: [MeshCom 262] …` nemá značku `GROUP`, takže odpověď jde do
+`mesh_group` a celý předmět se započítá do délky zprávy. Je proto lepší
+předmět zkrátit, případně doplnit `GROUP: <číslo>`.
 
 ## Dokumentace
 
