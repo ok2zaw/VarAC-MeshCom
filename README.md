@@ -163,8 +163,9 @@ Nastavuje se v **Nastavení** → *Přeposílání EMAIL:*:
 | *Přímé adresy do všech domén* | přímé adresy do jakékoli domény |
 | *Povolené domény přímých adres* | jinak jen do těchto domén (např. `example.net, example.com`) |
 
-**Aliasy** se přidávají v tabulce pod formulářem nastavení: alias (např.
-volací značka `OK2ABU`) a e-mail. Zpráva `EMAIL: OK2ABU text` pak odejde na
+**Aliasy** se spravují ve stejné sekci: alias (např. volací značka `OK2ABU`)
+a e-mail zadejte do polí pod tabulkou a klikněte na *Přidat alias* (ukládá se
+hned, nezávisle na tlačítku *Uložit*). Zpráva `EMAIL: OK2ABU text` pak odejde na
 zadanou adresu. Uložením stejného aliasu se adresa změní. Aliasy platí vždy,
 i když jsou přímé adresy vypnuté nebo doména není mezi povolenými.
 

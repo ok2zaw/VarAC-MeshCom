@@ -64,11 +64,11 @@
     </label>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="email-aliases">
     <legend>Přeposílání EMAIL: (mesh → zvolená adresa)</legend>
     <p class="hint">Zpráva do skupiny {{ cfg.mesh_group }} ve tvaru <code>EMAIL: ALIAS text</code> nebo
-      <code>EMAIL: adresa text</code> se pošle na danou adresu místo příjemce výše.
-      Aliasy se spravují <a class="clear-filter" href="#email-aliases">pod formulářem</a>.</p>
+      <code>EMAIL: adresa text</code> se pošle na danou adresu místo příjemce výše. Na velikosti písmen
+      nezáleží; aliasy platí vždy, bez ohledu na povolené domény.</p>
     <label class="checkbox">
       <input type="checkbox" name="mesh_email_forward" {{ 'checked' if cfg.mesh_email_forward }}>
       Přeposílat zprávy EMAIL:
@@ -84,6 +84,34 @@
     <label>Povolené domény přímých adres <span class="hint">(oddělené čárkou)</span>
       <input type="text" name="mesh_email_domains" value="{{ cfg.mesh_email_domains }}" placeholder="example.net, example.com">
     </label>
+
+    <div class="alias-block">
+      <h3>Aliasy</h3>
+      {% if email_aliases %}
+      <table class="msg-table alias-table">
+        <thead><tr><th>Alias</th><th>E-mail</th><th></th></tr></thead>
+        <tbody>
+        {% for alias, email in email_aliases.items() %}
+          <tr>
+            <td>{{ alias }}</td>
+            <td>{{ email }}</td>
+            <td><button type="submit" form="alias-delete" name="alias" value="{{ alias }}" class="link-button">smazat</button></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="hint">Zatím žádné aliasy.</p>
+      {% endif %}
+    </div>
+    <label>Nový alias <span class="hint">(stejný alias změní adresu)</span>
+      <input type="text" name="alias" form="alias-add" required maxlength="32"
+             pattern="[A-Za-z0-9][A-Za-z0-9._/\-]{0,31}" placeholder="OK1AAA">
+    </label>
+    <label>E-mail aliasu
+      <input type="email" name="email" form="alias-add" required placeholder="ok1aaa@example.net">
+    </label>
+    <button type="submit" form="alias-add" class="alias-add-button">Přidat alias</button>
   </fieldset>
 
   <fieldset>
@@ -139,43 +167,11 @@
   <button type="submit">Uložit</button>
 </form>
 
-<h2 id="email-aliases">Aliasy pro EMAIL:</h2>
-<p class="alias-note">Zpráva <code>EMAIL: ALIAS text</code> se pošle na adresu aliasu. Na velikosti písmen u aliasu
-  nezáleží. Aliasy platí vždy, bez ohledu na povolené domény.</p>
-{% if email_aliases %}
-<table class="msg-table alias-table">
-  <thead><tr><th>Alias</th><th>E-mail</th><th></th></tr></thead>
-  <tbody>
-  {% for alias, email in email_aliases.items() %}
-    <tr>
-      <td>{{ alias }}</td>
-      <td>{{ email }}</td>
-      <td>
-        <form method="post" action="{{ url_for('email_aliases') }}" class="inline-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="action" value="delete">
-          <input type="hidden" name="alias" value="{{ alias }}">
-          <button type="submit" class="link-button">smazat</button>
-        </form>
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="alias-note">Zatím žádné aliasy.</p>
-{% endif %}
-<form method="post" action="{{ url_for('email_aliases') }}" class="config-form alias-form">
+<form method="post" action="{{ url_for('email_aliases') }}" id="alias-add">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <fieldset>
-    <legend>Přidat nebo změnit alias</legend>
-    <label>Alias
-      <input type="text" name="alias" required maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9._/\-]{0,31}" placeholder="OK1AAA">
-    </label>
-    <label>E-mail
-      <input type="email" name="email" required placeholder="ok1aaa@example.net">
-    </label>
-    <button type="submit">Uložit alias</button>
-  </fieldset>
+</form>
+<form method="post" action="{{ url_for('email_aliases') }}" id="alias-delete">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="delete">
 </form>
 {% endblock %}
