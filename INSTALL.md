@@ -288,6 +288,67 @@ Gitu. Tato varianta dovoluje odesílat přes relay programům na Raspberry; klie
 na PC zatím používá SMTP vlastní domény přímo. SMTP submission z VPN přes
 Raspberry by vyžadovalo samostatně nakonfigurované přihlášení a firewall.
 
+### Pošta systémových služeb do vlastní schránky
+
+Programy na Raspberry (cron, systemd, LinBPQ, gateway) posílají poštu místním
+adresám jako `root` nebo `ok2zaw`. Aby došla do vaší běžné e-mailové schránky,
+musí ji Postfix přeposlat a přepsat odesílatele: poskytovatel SMTP (např.
+Seznam) jinak zprávu od `root@raspberrypi` odmítne, protože neodpovídá
+přihlášenému účtu. Pro samotné přeposílání nejsou Dovecot ani getmail6 potřeba.
+
+Při instalaci Postfixu zvolte v dialogu **Satellite system** (nebo *No
+configuration*) a jako *System mail name* ponechte hostname Raspberry; zbytek
+nastavíte příkazy z předchozí části. Pro test nainstalujte i příkaz `mail`:
+
+```bash
+sudo apt install -y postfix libsasl2-modules bsd-mailx
+```
+
+Údaje poskytovatele najdete v jeho nápovědě; pro Seznam je to `smtp.seznam.cz`
+(587 se STARTTLS nebo 465 s SSL). Pro port 465 přidejte
+`sudo postconf -e 'smtp_tls_wrappermode = yes'` a v `relayhost` i
+`sasl_passwd` uveďte `:465`. Při zapnutém dvoufázovém ověření použijte heslo
+pro aplikace, je-li ho poskytovatel vyžaduje.
+
+Přesměrujte místní adresy na vaši schránku (`vas@example.net` nahraďte):
+
+```bash
+sudoedit /etc/aliases
+```
+
+```text
+root: ok2zaw
+ok2zaw: vas@example.net
+```
+
+Chcete-li zároveň ponechat místní kopii (Dovecot, BBS z kapitoly 12.7), použijte
+`ok2zaw: \ok2zaw, vas@example.net`. Změnu aliasů načtěte příkazem
+`sudo newaliases`.
+
+Přepište odesílatele všech místních zpráv na účet, kterým se Postfix přihlašuje
+k poskytovateli:
+
+```bash
+HOST=$(postconf -h myhostname)
+printf '@%s vas@example.net\n@localhost vas@example.net\n' "$HOST" | sudo tee /etc/postfix/generic
+sudo postmap /etc/postfix/generic
+sudo postconf -e 'smtp_generic_maps = hash:/etc/postfix/generic'
+sudo systemctl restart postfix
+```
+
+Odeslání otestujte a sledujte log Postfixu:
+
+```bash
+echo "Test pošty z Raspberry" | mail -s "Test z $(hostname)" root
+sudo journalctl -u postfix@- -n 30 --no-pager   # status=sent (250 ...) = doručeno
+mailq                                            # zprávy čekající ve frontě
+```
+
+Po výpadku internetu Postfix odešle frontu sám; okamžitě ji lze odeslat
+příkazem `sudo postqueue -f`. Cron posílá výstup úloh na adresu z proměnné
+`MAILTO` v crontabu, jinak vlastníkovi crontabu. Gateway může posílat přes
+stejnou frontu, viz *Nastavení MeshCom gateway ve webovém prostředí* níže.
+
 ### Dovecot: lokální schránka přes IMAPS
 
 Vytvořte Maildir pod účtem, pod kterým poběží lokální schránka a getmail. Pro
@@ -305,10 +366,101 @@ V `/etc/dovecot/conf.d/10-mail.conf` nastavte:
 mail_location = maildir:~/Maildir
 ```
 
-V `/etc/dovecot/conf.d/10-ssl.conf` ponechte TLS zapnuté a nastavte certifikát,
-který klient důvěřuje a jehož jméno odpovídá adrese Raspberry používané přes
-VPN. IMAPS na portu 993 povolte jen z LAN/VPN; nevytvářejte přesměrování z WAN.
-Konkrétní Dovecot uživatel a jeho IMAP heslo musí odpovídat vlastníkovi Maildiru.
+#### Certifikát pro IMAPS
+
+Mailový klient ověřuje, že certifikát obsahuje přesně tu adresu, na kterou se
+připojuje. Debian při instalaci vytvoří certifikát jen na hostname, takže klient
+připojený přes IP z LAN nebo VPN hlásí nesoulad jména. Vytvořte vlastní
+certifikát se všemi adresami, přes které se k Raspberry připojujete (příklad:
+jméno v LAN, IP v LAN a IP ve VPN; nepoužité položky vynechte):
+
+```bash
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+  -keyout /etc/dovecot/private/dovecot.key -out /etc/dovecot/private/dovecot.pem \
+  -subj "/CN=meshcom.lan" \
+  -addext "subjectAltName=DNS:meshcom.lan,IP:192.168.1.20,IP:10.8.0.2"
+sudo chmod 600 /etc/dovecot/private/dovecot.key
+```
+
+V `/etc/dovecot/conf.d/10-ssl.conf` musí být:
+
+```text
+ssl = required
+ssl_cert = </etc/dovecot/private/dovecot.pem
+ssl_key = </etc/dovecot/private/dovecot.key
+```
+
+Certifikát je podepsaný sám sebou: klient (Thunderbird, telefon) při prvním
+připojení zobrazí varování. Ověřte otisk a přidejte trvalou výjimku. Otisk
+zjistíte příkazem
+`openssl x509 -in /etc/dovecot/private/dovecot.pem -noout -fingerprint -sha256`.
+Certifikát od Let's Encrypt jde použít jen s veřejným doménovým jménem.
+
+Nešifrovaný IMAP na portu 143 vypněte v `/etc/dovecot/conf.d/10-master.conf`;
+zůstane jen IMAPS na 993:
+
+```text
+service imap-login {
+  inet_listener imap {
+    port = 0
+  }
+  inet_listener imaps {
+    port = 993
+    ssl = yes
+  }
+}
+```
+
+#### Přístup jen z LAN/VPN
+
+Dovecot poslouchá na všech rozhraních Raspberry. Z internetu je nedostupný,
+dokud na routeru **nepřesměrujete port 993 (ani 143) na Pi**; to nedělejte.
+Vzdálený přístup řešte VPN na routeru (WireGuard, OpenVPN): klient je pak
+„v LAN“ a připojuje se na vnitřní nebo VPN adresu Pi. Pokud chcete omezení i
+přímo na Pi firewallem, povolte v něm i všechny ostatní používané porty (SSH 22,
+web 8899, UDP 1799, viz kapitola 9.4), jinak se odříznete.
+
+#### Uživatel a heslo pro IMAP
+
+Výchozí Debian Dovecot přihlašuje systémové uživatele přes PAM: jméno `ok2zaw`
+a jeho **linuxové heslo** (stejné jako pro SSH a `sudo`). Maildir v
+`/home/ok2zaw/Maildir` patří stejnému uživateli, takže to funguje bez dalšího
+nastavení. Heslo ale uložíte do každého mailového klienta a telefonu.
+
+Doporučeno je samostatné heslo jen pro IMAP. V `/etc/dovecot/conf.d/10-auth.conf`
+zakomentujte `!include auth-system.conf.ext` a odkomentujte
+`!include auth-passwdfile.conf.ext`. Vytvořte hash hesla a soubor uživatelů:
+
+```bash
+doveadm pw -s SHA512-CRYPT          # zeptá se na nové IMAP heslo, vypíše {SHA512-CRYPT}$6$...
+sudoedit /etc/dovecot/users
+```
+
+Do souboru vložte jeden řádek (`1000:1000` nahraďte výstupem `id -u ok2zaw` a
+`id -g ok2zaw`, hash vložte celý včetně `{SHA512-CRYPT}`):
+
+```text
+ok2zaw:{SHA512-CRYPT}$6$...:1000:1000::/home/ok2zaw
+```
+
+```bash
+sudo chown root:dovecot /etc/dovecot/users
+sudo chmod 640 /etc/dovecot/users
+sudo systemctl restart dovecot
+```
+
+#### Test a nastavení klienta
+
+```bash
+sudo doveadm auth test ok2zaw            # ověří jméno a heslo
+openssl s_client -connect 127.0.0.1:993 -quiet
+# po připojení napište:  a login ok2zaw HESLO   b select INBOX   c logout
+sudo journalctl -u dovecot -n 30 --no-pager
+```
+
+V mailovém klientovi zadejte: server = adresa Pi z certifikátu, port `993`,
+zabezpečení `SSL/TLS`, ověření `normální heslo`, uživatel `ok2zaw`. Odchozí
+poštu klient posílá přes SMTP svého poskytovatele, ne přes Pi.
 
 ### getmail6: stažení veřejné pošty do lokální schránky
 
