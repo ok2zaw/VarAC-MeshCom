@@ -45,7 +45,7 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
 - Otevřít webové GUI Mercury (spektrum, vodopád, stav spojení) tlačítkem
 	**Otevřít GUI** na kartě Mercury. Postup:
-	1. Na záložce VarAC zaškrtněte *Webové GUI Mercury* (port 10080) a uložte.
+	1. Na záložce VarAC zaškrtněte *Webové GUI Mercury* (port 10088) a uložte.
 	2. Mercury restartujte.
 	3. Tlačítko se ukáže, jakmile GUI na portu odpovídá. Jinak karta vysvětlí
 	   proč: GUI je vypnuté, nebo Mercury běží bez něj a je třeba ho restartovat.

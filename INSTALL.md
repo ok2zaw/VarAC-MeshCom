@@ -701,13 +701,13 @@ prázdná:
 | 25, 587, 993/TCP | Postfix, Dovecot | kapitola 8, jen LAN/VPN |
 | 8300–8301/TCP | VARA (ARQ, data) | výchozí, kapitola 11 |
 | 8400–8401/TCP | Mercury (ARQ, data) | `-p 8400`, aby nekolidoval s VARA |
-| 10080/TCP | webové GUI Mercury | `-G -U`; bez přihlášení, jen LAN/VPN |
+| 10088/TCP | webové GUI Mercury | `-G -U`; bez přihlášení, jen LAN/VPN |
 | 10001, 10002/TCP | LoRa TNC1, TNC2 (KISS) | jen `127.0.0.1` |
 | 8008, 8010/TCP | LinBPQ web, telnet | jen LAN/VPN |
 | 8025, 8110/TCP | BPQMail SMTP, POP3 | kapitola 12.6 |
 
 Obsazené porty zjistíte příkazem `sudo ss -ltnup`. Pokud na Pi běží **Webmin**,
-používá port `10000` – proto má webové GUI Mercury výchozí port `10080`.
+používá port `10000` – proto má webové GUI Mercury výchozí port `10088`.
 Webmin lze případně přesunout jinam (*Webmin* → *Webmin Configuration* →
 *Ports and Addresses*, nebo):
 
@@ -936,19 +936,22 @@ v jednu chvíli jen jeden modem.
 **Webové GUI Mercury:** s přepínačem `-G` Mercury sám servíruje webové
 rozhraní se spektrem, vodopádem, stavem spojení a nastavením rádia a zvuku –
 na Pi není potřeba nic doinstalovat ani mít desktop. Na záložce **VarAC**
-zaškrtněte *Webové GUI Mercury* (výchozí port `10080`), uložte a Mercury
+zaškrtněte *Webové GUI Mercury* (výchozí port `10088`), uložte a Mercury
 restartujte; na kartě Mercury se objeví tlačítka **Otevřít GUI**
-(`http://<IP-Pi>:10080/mercury.html`) a **Vodopád** (`waterfall.html`).
+(`http://<IP-Pi>:10088/mercury.html`) a **Vodopád** (`waterfall.html`).
 Tlačítka se ukážou jen tehdy, když na portu GUI něco opravdu naslouchá. Pokud
 Mercury běží, ale GUI neodpovídá (typicky byl spuštěn před zapnutím volby),
 karta to napíše – stačí Mercury restartovat. GUI lze otevřít i ručně
 zadáním uvedené adresy do prohlížeče.
-Samotný Mercury má výchozí port GUI `10000`; aplikace ho nastavuje na `10080`,
-protože port 10000 používá Webmin (viz kapitola 9.4).
+Samotný Mercury má výchozí port GUI `10000`; aplikace ho nastavuje na `10088`,
+protože port 10000 používá Webmin (viz kapitola 9.4). Nepoužívejte porty,
+které prohlížeče blokují (Chrome hlásí `ERR_UNSAFE_PORT`), např. `10080`,
+`6000` nebo `6665–6669`. Formulář je odmítne a dříve uložený port `10080`
+aplikace automaticky nahradí portem `10088` (projeví se po restartu Mercury).
 Vodopád a spektrum zatěžují CPU; volba *Bez vodopádu* (`-W`) je vypne.
 
 > **Bezpečnost:** GUI Mercury nemá přihlášení – kdokoli, kdo se dostane na
-> jeho port, může modem ovládat včetně vysílání. Port 10080 zpřístupněte jen
+> jeho port, může modem ovládat včetně vysílání. Port 10088 zpřístupněte jen
 > v LAN/VPN, nikdy ho nepřesměrovávejte z internetu.
 
 Grafická aplikace `mercury-ui` (Fyne) obsahuje vlastní kopii modemu, proto ji
@@ -1022,7 +1025,7 @@ Zdroje:
 | Program na záložce VarAC hned skončí (Chyba) | rozbalte jeho výpis na záložce, nebo `journalctl --user -u meshcom-radio-<program>` |
 | Okno VARA/VarAC se neobjeví | zkontrolujte přihlášený desktop a hodnotu Displej (`echo $DISPLAY` v terminálu desktopu) |
 | VarAC se nepřipojí k Mercury | port ve VarAC musí odpovídat `-p` v parametrech Mercury |
-| GUI Mercury se nenačte | Mercury musí běžet se zapnutým webovým GUI (po změně restart); `ss -ltn \| grep 10080`; port nesmí používat jiná služba (Webmin) |
+| GUI Mercury se nenačte | Mercury musí běžet se zapnutým webovým GUI (po změně restart); `ss -ltn \| grep 10088`; port nesmí používat jiná služba (Webmin) ani být blokován prohlížečem (`ERR_UNSAFE_PORT` u 10080) |
 | Vysoká teplota, nízký výkon | `vcgencmd measure_temp`, `vcgencmd get_throttled`; použijte aktivní chladič |
 
 Zátěž lze sledovat příkazem `htop`. Trvale přes 90 % CPU při příjmu znamená,

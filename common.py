@@ -62,7 +62,7 @@ DEFAULT_CONFIG = {
     "radio_mercury_autostart": False,
     "radio_mercury_delay": 10,
     "radio_mercury_gui": False,
-    "radio_mercury_gui_port": 10080,
+    "radio_mercury_gui_port": 10088,
     "radio_mercury_no_waterfall": False,
     "radio_varac_path": os.path.join(WINE_PREFIX, "drive_c", "VarAC", "VarAC.exe"),
     "radio_varac_autostart": False,

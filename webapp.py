@@ -438,6 +438,9 @@ def save_radio_settings(form_data, cfg):
     modem_port = radio_apps.mercury_port(new_cfg)
     if not 1024 <= gui_port <= 65535:
         errors.append("Mercury: port webového GUI musí být 1024 až 65535.")
+    elif gui_port in radio_apps.BROWSER_BLOCKED_PORTS:
+        errors.append(f"Mercury: port {gui_port} prohlížeče blokují (ERR_UNSAFE_PORT), zvolte jiný, např. "
+                      f"{radio_apps.DEFAULT_MERCURY_GUI_PORT}.")
     elif gui_port in {modem_port, modem_port + 1}:
         errors.append(f"Mercury: port webového GUI koliduje s TCP portem modemu {modem_port}/{modem_port + 1}.")
     else:
@@ -529,14 +532,16 @@ def radio():
         cfg.get("radio_vara_autostart") and cfg.get("radio_mercury_autostart")
         or all(item["status"]["state"] == "active" for item in apps if item["name"] in {"vara", "mercury"})
     )
+    mercury_gui_port = radio_apps.mercury_gui_port(cfg)
     mercury_gui_url = None
     mercury_gui_listening = False
     if cfg.get("radio_mercury_gui"):
-        mercury_gui_url = f"http://{request.host.split(':')[0]}:{radio_apps.mercury_gui_port(cfg)}/"
-        mercury_gui_listening = port_listening(radio_apps.mercury_gui_port(cfg))
+        mercury_gui_url = f"http://{request.host.split(':')[0]}:{mercury_gui_port}/"
+        mercury_gui_listening = port_listening(mercury_gui_port)
     return render_template(
         "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
-        mercury_gui_url=mercury_gui_url, mercury_gui_listening=mercury_gui_listening,
+        mercury_gui_port=mercury_gui_port, mercury_gui_url=mercury_gui_url,
+        mercury_gui_listening=mercury_gui_listening,
         port_conflict=port_conflict,
         autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
     )

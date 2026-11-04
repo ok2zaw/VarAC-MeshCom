@@ -24,7 +24,7 @@
     <div class="card-sub">
       {% if not mercury_gui_url %}Webové GUI je vypnuté – zapněte <a class="clear-filter" href="#mercury-gui">Webové GUI Mercury</a> níže, uložte a Mercury restartujte.
       {% elif mercury_gui_listening %}GUI: {{ mercury_gui_url }}mercury.html
-      {% elif state == 'active' %}GUI na portu {{ cfg.radio_mercury_gui_port }} neodpovídá – Mercury běží bez webového GUI; restartujte ho.
+      {% elif state == 'active' %}GUI na portu {{ mercury_gui_port }} neodpovídá – Mercury běží bez webového GUI; restartujte ho.
       {% else %}GUI bude po spuštění na {{ mercury_gui_url }}mercury.html{% endif %}
     </div>
     {% endif %}
@@ -89,7 +89,7 @@
       Webové GUI Mercury (spektrum, vodopád, stav; přepínač -G)
     </label>
     <label>Port webového GUI Mercury
-      <input type="number" name="radio_mercury_gui_port" value="{{ cfg.radio_mercury_gui_port }}" min="1024" max="65535">
+      <input type="number" name="radio_mercury_gui_port" value="{{ mercury_gui_port }}" min="1024" max="65535">
     </label>
     <label class="checkbox">
       <input type="checkbox" name="radio_mercury_no_waterfall" {{ 'checked' if cfg.radio_mercury_no_waterfall }}>

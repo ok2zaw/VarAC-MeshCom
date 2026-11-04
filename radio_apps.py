@@ -28,7 +28,10 @@ WINESERVER_UNIT = f"{UNIT_PREFIX}wineserver.service"
 AUTOSTART_FILE = os.path.join(os.path.expanduser("~"), ".config", "autostart", "meshcom-radio.desktop")
 MAX_DELAY_SECONDS = 600
 DEFAULT_MODEM_PORT = 8300
-DEFAULT_MERCURY_GUI_PORT = 10080
+DEFAULT_MERCURY_GUI_PORT = 10088
+# Ports >= 1024 that Chrome and Firefox refuse to open (ERR_UNSAFE_PORT, Fetch "bad port" list).
+BROWSER_BLOCKED_PORTS = frozenset({1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566,
+                                   6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080})
 
 APPS = {
     "vara": {"label": "VARA", "kind": "wine", "path_key": "radio_vara_path"},
@@ -110,6 +113,8 @@ def mercury_gui_port(cfg: dict) -> int:
     try:
         configured = int(cfg.get("radio_mercury_gui_port", DEFAULT_MERCURY_GUI_PORT))
     except (TypeError, ValueError):
+        configured = DEFAULT_MERCURY_GUI_PORT
+    if configured in BROWSER_BLOCKED_PORTS:
         configured = DEFAULT_MERCURY_GUI_PORT
     return _mercury_option(cfg, "-U", configured)
 

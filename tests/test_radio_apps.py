@@ -77,9 +77,19 @@ class RadioAppsTests(unittest.TestCase):
                 "radio_varac_delay": "0", "radio_mercury_gui": "on", "radio_mercury_gui_port": "8401"}
         _, errors = webapp.save_radio_settings(form, self.cfg)
         self.assertEqual(len(errors), 1)
-        new_cfg, errors = webapp.save_radio_settings({**form, "radio_mercury_gui_port": "10080"}, self.cfg)
+        new_cfg, errors = webapp.save_radio_settings({**form, "radio_mercury_gui_port": "10088"}, self.cfg)
         self.assertEqual(errors, [])
         self.assertTrue(new_cfg["radio_mercury_gui"])
+        _, errors = webapp.save_radio_settings({**form, "radio_mercury_gui_port": "10080"}, self.cfg)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("ERR_UNSAFE_PORT", errors[0])
+
+    def test_browser_blocked_gui_port_falls_back_to_default(self):
+        self.assertEqual(radio_apps.mercury_gui_port({"radio_mercury_gui_port": 10080}), 10088)
+        with patch.object(radio_apps.shutil, "which", return_value="/usr/bin/mercury"):
+            command = radio_apps.app_command("mercury", {**self.cfg, "radio_mercury_args": "-x alsa",
+                                                         "radio_mercury_gui": True, "radio_mercury_gui_port": 10080})
+        self.assertEqual(command, ["mercury", "-x", "alsa", "-G", "-U", "10088"])
 
     def test_wine_path_must_exist_and_be_exe(self):
         for path in ("/tmp/script.sh", os.path.join(self.tmp.name, "missing.exe")):
@@ -133,7 +143,7 @@ class RadioAppsTests(unittest.TestCase):
         new_cfg, errors = webapp.save_radio_settings(
             {**{key: self.cfg[key] for key in webapp.RADIO_TEXT_FIELDS},
              "radio_vara_delay": "900", "radio_mercury_delay": "5", "radio_varac_delay": "x",
-             "radio_mercury_gui_port": "10080"},
+             "radio_mercury_gui_port": "10088"},
             self.cfg,
         )
         self.assertEqual(len(errors), 2)
@@ -159,8 +169,8 @@ class RadioAppsTests(unittest.TestCase):
 
     def test_radio_page_links_running_mercury_gui(self):
         page, port_listening = self._radio_page({"radio_mercury_gui": True, "radio_mercury_gui_port": 10080}, True)
-        port_listening.assert_called_once_with(10080)
-        self.assertIn('class="button-link" href="http://192.168.1.20:10080/mercury.html"', page)
+        port_listening.assert_called_once_with(10088)
+        self.assertIn('class="button-link" href="http://192.168.1.20:10088/mercury.html"', page)
         self.assertIn("waterfall.html", page)
 
     def test_radio_page_explains_missing_mercury_gui(self):
