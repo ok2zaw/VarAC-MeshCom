@@ -1229,25 +1229,70 @@ Důležité:
 
 ### 12.3 Instalace LinBPQ
 
-Použijte oficiální instalační skript autora (G8BPQ), který stáhne verzi pro
-Raspberry Pi do `/home/ok2zaw/linbpq`. Spusťte jako `ok2zaw`:
+Použijte oficiální instalační skript autora (G8BPQ). Spusťte ho jako `ok2zaw`
+v domovském adresáři:
 
 ```bash
 cd /home/ok2zaw
 wget https://www.cantab.net/users/john.wiseman/Downloads/installLinBPQ
 less installLinBPQ        # projděte, co skript dělá
-chmod +x installLinBPQ
-./installLinBPQ
+bash installLinBPQ
 ls -l /home/ok2zaw/linbpq/
 ```
 
-Pokud chybí knihovna `libconfig`, doinstalujte ji (`sudo apt install libconfig9`
-nebo `libconfig11` podle verze systému). Pokud skript nebo nástroj
-`bpq-config` vytvořil systémovou službu `bpq.service`, vypněte ji – LinBPQ
-bude spouštět záložka BPQ a dvě instance by se praly o porty:
+Skript vytvoří `/home/ok2zaw/linbpq` a stáhne do něj jen:
+
+- `linbpq`, na ARM vždy **32bitovou** verzi (`pilinbpq`, armhf),
+- webové stránky do `HTML/`,
+- volitelného APRS klienta `bpqaprs` a složku `BPQAPRS`.
+
+Neinstaluje žádné balíčky, **nevytváří `bpq32.cfg`** (napíšete ho v kroku
+12.4) ani systémovou službu. Při prvním ručním spuštění proto LinBPQ hlásí
+`Could not open file …/bpq32.cfg` – to je v pořádku.
+
+**64bitový systém (arm64).** Raspberry Pi OS na Pi 5 je 64bitový
+(`dpkg --print-architecture` vypíše `arm64`). 32bitový `linbpq` pak skončí
+chybou `No such file or directory` (ve službě `status=203/EXEC`), i když soubor
+existuje – chybí 32bitový zavaděč `/lib/ld-linux-armhf.so.3`. Možnosti:
+
+1. **64bitová verze autora** (doporučeno). Ve složce stahování je
+   `pilinbpq64`; před nasazením ověřte, že je opravdu pro `aarch64`:
+
+   ```bash
+   cd /home/ok2zaw/linbpq
+   wget https://www.cantab.net/users/john.wiseman/Downloads/pilinbpq64 -O linbpq64
+   file linbpq64             # má vypsat: ELF 64-bit ... ARM aarch64
+   mv linbpq linbpq-armhf && mv linbpq64 linbpq && chmod +x linbpq
+   ```
+
+2. **Ponechat 32bitovou verzi** a doinstalovat knihovny armhf. Potřebné
+   knihovny vypíše `readelf -d linbpq | grep NEEDED`; pro LinBPQ 6.0.26 na
+   Debianu 13 (trixie) to jsou:
+
+   ```bash
+   sudo dpkg --add-architecture armhf
+   sudo apt update
+   sudo apt install -y libc6:armhf libgcc-s1:armhf zlib1g:armhf libasound2t64:armhf
+   ```
+
+   Na Debianu 12 (bookworm) je místo `libasound2t64` balík `libasound2`.
+
+V obou případech ověřte, že nic nechybí (žádné `not found`):
 
 ```bash
-sudo systemctl disable --now bpq.service 2>/dev/null || true
+file /home/ok2zaw/linbpq/linbpq
+ldd /home/ok2zaw/linbpq/linbpq
+```
+
+`bpqaprs` pro uzel ani BBS potřeba není. Pokud ho chcete používat
+s 32bitovou verzí, potřebuje navíc `libjpeg62-turbo:armhf`.
+
+Pokud jste dříve podle jiného návodu nebo nástrojem `bpq-config` vytvořili
+systémovou službu `bpq.service` či `linbpq.service`, vypněte ji – LinBPQ bude
+spouštět záložka BPQ a dvě instance by se praly o porty:
+
+```bash
+sudo systemctl disable --now bpq.service linbpq.service 2>/dev/null || true
 ```
 
 ### 12.4 Základní konfigurace `bpq32.cfg`
@@ -1474,6 +1519,8 @@ Každá stažená zpráva pak přistane v místní schránce i v BBS u uživatel
 | Problém | Řešení |
 | --- | --- |
 | TNC hlásí chybu GPIO / `RuntimeError` | na Pi 5 musí být `python3-rpi-lgpio`, ne `python3-rpi.gpio`; zkontrolujte IRQ pin (TNC1 = 5, TNC2 = 19) a členství ve skupinách `spi`, `gpio` |
+| LinBPQ: `status=203/EXEC`, `No such file or directory` | 32bitový `linbpq` na 64bitovém systému – použijte `pilinbpq64` nebo doinstalujte knihovny armhf (12.3); ověřte `file` a `ldd` |
+| LinBPQ hned skončí, `Could not open file …/bpq32.cfg` | vytvořte `bpq32.cfg` (12.4); skript autora ho nevytváří |
 | `/dev/spidev0.0` neexistuje | `sudo raspi-config nonint do_spi 0` a restart |
 | LinBPQ se nepřipojí k TNC | `ss -ltn \| grep -E '1000[12]'`; TNC musí běžet dřív než LinBPQ a `TCPPORT` v `bpq32.cfg` musí odpovídat portu TNC |
 | TNC nepřijímá nic, druhý funguje | zkontrolujte chip select (TNC1 = 0, TNC2 = 1) a IRQ pin; oba TNC nesmí mít stejné hodnoty |
