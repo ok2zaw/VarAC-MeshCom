@@ -93,12 +93,31 @@ DEFAULT_CONFIG = {
             "preamble": 8,
             "output_power": 15,
             "sync_word": "0x12",
+            # AX.25 link settings of the matching KISS port in bpq32.cfg (slow LoRa channel)
+            "paclen": 128,
+            "maxframe": 1,
+            "frack": 20000,
+            "resptime": 1000,
+            "retries": 10,
         }.items()
     },
     "linbpq_path": os.path.join(HOME_DIR, "linbpq", "linbpq"),
     "linbpq_autostart": False,
     "linbpq_delay": 15,
     "linbpq_web_port": 8008,
+    # bpq32.cfg generated on the BPQ tab; the sysop password is kept only in that file
+    "bpq_nodecall": "",
+    "bpq_nodealias": "",
+    "bpq_locator": "",
+    "bpq_info": "LinBPQ uzel s BBS pres LoRa",
+    "bpq_ctext": "",
+    "bpq_telnet_port": 8010,
+    "bpq_localnet": "",
+    "bpq_sysop_user": "sysop",
+    "bpq_sysop_call": "",
+    "bpq_bbs_enabled": True,
+    "bpq_bbs_call": "",
+    "bpq_bbs_alias": "",
 }
 
 

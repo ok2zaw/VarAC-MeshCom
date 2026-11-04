@@ -110,14 +110,95 @@
     <label>Program LinBPQ <span class="hint">(adresář s bpq32.cfg)</span>
       <input type="text" name="linbpq_path" value="{{ cfg.linbpq_path }}">
     </label>
-    <label>Port webu LinBPQ
-      <input type="number" name="linbpq_web_port" value="{{ cfg.linbpq_web_port }}" min="1" max="65535">
-    </label>
   </fieldset>
 
   <p class="hint">Uložení přepíše ~/.config/meshcom/tnc*.json a soubory služeb v ~/.config/systemd/user. Kmitočet a parametry LoRa musí odpovídat protistanicím; TNC podporuje moduly SX127x (RFM96/98).</p>
   <button type="submit">Uložit</button>
 </form>
+
+<h2 id="bpq-config">Konfigurace LinBPQ (bpq32.cfg)</h2>
+<p class="log-note">Web vytvoří <code>{{ bpq_cfg_path }}</code> s uzlem, portem Telnet/web s uživatelem sysop,
+  KISS portem pro každý povolený TNC (TCP porty podle nastavení TNC výše) a BBS.
+  {% if bpq_cfg_exists %}Soubor už existuje – před přepsáním se zazálohuje jako <code>bpq32.cfg.bak-&lt;datum&gt;</code>.{% endif %}
+  Heslo se ukládá jen do tohoto souboru (práva 0600), ne do nastavení gateway.</p>
+<form method="post" action="{{ url_for('bpq') }}" class="config-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="bpqcfg">
+  <fieldset>
+    <legend>Uzel</legend>
+    <label>Značka uzlu <span class="hint">(se SSID)</span>
+      <input type="text" name="bpq_nodecall" value="{{ cfg.bpq_nodecall }}" placeholder="OK2ZAW-7" required>
+    </label>
+    <label>Alias uzlu <span class="hint">(1–6 znaků)</span>
+      <input type="text" name="bpq_nodealias" value="{{ cfg.bpq_nodealias }}" placeholder="ZAWNOD" maxlength="6" required>
+    </label>
+    <label>Lokátor <span class="hint">(mapa uzlů, nepovinné)</span>
+      <input type="text" name="bpq_locator" value="{{ cfg.bpq_locator }}" placeholder="JN89AA" maxlength="6">
+    </label>
+    <label class="wide">Informační text <span class="hint">(příkaz I; víc řádků)</span>
+      <textarea name="bpq_info" rows="3">{{ cfg.bpq_info }}</textarea>
+    </label>
+    <label class="wide">Uvítací text po připojení <span class="hint">(nepovinné)</span>
+      <textarea name="bpq_ctext" rows="2">{{ cfg.bpq_ctext }}</textarea>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Telnet a web LinBPQ</legend>
+    <label>Telnet port
+      <input type="number" name="bpq_telnet_port" value="{{ cfg.bpq_telnet_port }}" min="1024" max="65535">
+    </label>
+    <label>Port webu LinBPQ
+      <input type="number" name="linbpq_web_port" value="{{ cfg.linbpq_web_port }}" min="1024" max="65535">
+    </label>
+    <label>Místní síť <span class="hint">(LOCALNET, nepovinné)</span>
+      <input type="text" name="bpq_localnet" value="{{ cfg.bpq_localnet }}" placeholder="192.168.99.0/24">
+    </label>
+    <label>Uživatel sysop
+      <input type="text" name="bpq_sysop_user" value="{{ cfg.bpq_sysop_user }}" required>
+    </label>
+    <label>Heslo sysopa <span class="hint">({{ 'prázdné = ponechat současné' if bpq_cfg_exists else 'povinné' }})</span>
+      <input type="password" name="bpq_sysop_password" value="" autocomplete="new-password" placeholder="••••••••">
+    </label>
+    <label>Značka sysopa <span class="hint">(prázdné = značka uzlu bez SSID)</span>
+      <input type="text" name="bpq_sysop_call" value="{{ cfg.bpq_sysop_call }}" placeholder="OK2ZAW">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>BBS</legend>
+    <label class="checkbox">
+      <input type="checkbox" name="bpq_bbs_enabled" {{ 'checked' if cfg.bpq_bbs_enabled }}>
+      Zapnout BBS (LINMAIL)
+    </label>
+    <label>Značka BBS <span class="hint">(jiné SSID než uzel)</span>
+      <input type="text" name="bpq_bbs_call" value="{{ cfg.bpq_bbs_call }}" placeholder="OK2ZAW-1">
+    </label>
+    <label>Alias BBS
+      <input type="text" name="bpq_bbs_alias" value="{{ cfg.bpq_bbs_alias }}" placeholder="ZAWBBS" maxlength="6">
+    </label>
+  </fieldset>
+
+  {% for tnc in tncs %}
+  <fieldset>
+    <legend>{{ tnc|upper }} – port AX.25 v LinBPQ{% if not cfg[tnc ~ '_enabled'] %} <span class="hint">(TNC není povolen, port se nevytvoří)</span>{% endif %}</legend>
+    {% for suffix, label, minimum, maximum in ax25_fields %}
+    <label>{{ label }}
+      <input type="number" name="{{ tnc }}_{{ suffix }}" value="{{ cfg[tnc ~ '_' ~ suffix] }}" min="{{ minimum }}" max="{{ maximum }}">
+    </label>
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+
+  <p class="hint">Výchozí hodnoty odpovídají pomalému LoRa kanálu (SF12/BW125): rámec 128 bajtů trvá přes 4 s, proto
+    FRACK 20 s a MAXFRAME 1. Po zápisu LinBPQ restartujte.</p>
+  <button type="submit">Uložit a zapsat bpq32.cfg</button>
+</form>
+
+<details class="radio-log">
+  <summary>Náhled bpq32.cfg <span class="hint">(heslo skryté)</span></summary>
+  <pre>{{ bpq_preview if bpq_preview else 'Náhled není k dispozici: ' ~ bpq_preview_error }}</pre>
+</details>
 
 <h2 id="service-log">Výpis a provoz</h2>
 <p class="map-legend map-controls log-controls">

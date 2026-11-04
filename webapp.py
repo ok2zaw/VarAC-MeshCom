@@ -33,6 +33,7 @@ from functools import wraps
 
 from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
 
+import bpq_config
 import bpq_services
 import common
 import gateway
@@ -676,16 +677,32 @@ def save_bpq_settings(form_data, cfg):
             errors.append(f"{spec['label']}: zpoždění musí být 0 až {bpq_services.MAX_DELAY_SECONDS} s.")
             continue
         new_cfg[f"{service}_delay"] = delay
-    try:
-        port = int(form_data.get("linbpq_web_port", ""))
-    except (TypeError, ValueError):
-        port = 0
-    if 1 <= port <= 65535:
-        new_cfg["linbpq_web_port"] = port
-    else:
-        errors.append("Port webu LinBPQ musí být v rozsahu 1 až 65535.")
     errors.extend(bpq_services.validate(new_cfg))
     return new_cfg, errors
+
+
+BPQ_NODE_TEXT_FIELDS = ("bpq_nodecall", "bpq_nodealias", "bpq_locator", "bpq_info", "bpq_ctext",
+                        "bpq_localnet", "bpq_sysop_user", "bpq_sysop_call", "bpq_bbs_call", "bpq_bbs_alias")
+
+
+def save_bpq_node_settings(form_data, cfg):
+    """Settings of the bpq32.cfg form; returns (new_cfg, error or None)."""
+    new_cfg = dict(cfg)
+    for key in BPQ_NODE_TEXT_FIELDS:
+        value = str(form_data.get(key, cfg.get(key, ""))).replace("\r\n", "\n").strip()
+        new_cfg[key] = value if key in {"bpq_info", "bpq_ctext", "bpq_sysop_user"} else value.upper()
+    new_cfg["bpq_localnet"] = new_cfg["bpq_localnet"].lower()
+    new_cfg["bpq_bbs_enabled"] = form_data.get("bpq_bbs_enabled") == "on"
+    numeric = ["bpq_telnet_port", "linbpq_web_port"] + [
+        f"{tnc}_{suffix}" for tnc in bpq_services.TNCS for suffix, *_ in bpq_config.AX25_FIELDS]
+    for key in numeric:
+        raw = str(form_data.get(key, cfg.get(key, ""))).strip()
+        new_cfg[key] = int(raw) if raw.isdigit() else raw
+    try:
+        bpq_config.settings(new_cfg)
+    except radio_apps.RadioError as exc:
+        return new_cfg, str(exc)
+    return new_cfg, None
 
 
 @app.route("/bpq", methods=["GET", "POST"])
@@ -712,6 +729,20 @@ def bpq():
                     if not unit_errors:
                         flash("Nastavení uloženo. Běžící TNC a LinBPQ restartujte, aby změny použily.",
                               "success")
+        elif action == "bpqcfg":
+            new_cfg, error = save_bpq_node_settings(request.form, cfg)
+            if error:
+                flash(f"bpq32.cfg: {error}", "error")
+            else:
+                common.save_config(new_cfg)
+                try:
+                    path, backup = bpq_config.write(new_cfg, request.form.get("bpq_sysop_password", ""))
+                except (OSError, radio_apps.RadioError) as exc:
+                    flash(f"Nastavení uzlu uloženo, ale bpq32.cfg se nepodařilo zapsat: {exc}", "error")
+                else:
+                    flash(f"Zapsáno {path}" + (f" (původní soubor zálohován jako {os.path.basename(backup)})"
+                                                if backup else "") + ". Restartujte LinBPQ.", "success")
+            return redirect(url_for("bpq", _anchor="bpq-config"))
         elif action in {"start", "stop", "restart"}:
             service = request.form.get("service", "")
             if service not in bpq_services.SERVICES:
@@ -745,8 +776,15 @@ def bpq():
             "autostart": bool(cfg.get(f"{service}_autostart")),
             "delay": cfg.get(f"{service}_delay", 0),
         })
+    try:
+        bpq_preview, bpq_preview_error = bpq_config.preview(cfg), None
+    except radio_apps.RadioError as exc:
+        bpq_preview, bpq_preview_error = None, str(exc)
+    bpq_cfg_path = bpq_config.config_path(cfg)
     return render_template(
         "bpq.html", cfg=cfg, services=services, tncs=bpq_services.TNCS, log_lines=BPQ_LOG_LINES,
+        bpq_preview=bpq_preview, bpq_preview_error=bpq_preview_error, bpq_cfg_path=bpq_cfg_path,
+        bpq_cfg_exists=os.path.exists(bpq_cfg_path), ax25_fields=bpq_config.AX25_FIELDS,
         bandwidths=bpq_services.BANDWIDTHS,
         bpq_web_url=f"http://{request.host.split(':')[0]}:{cfg.get('linbpq_web_port', 8008)}/",
     )

@@ -57,8 +57,10 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	GUI nemá přihlášení, port zpřístupněte jen v LAN/VPN.
 - Spouštět, nastavovat a sledovat dva LoRa KISS TNC (TNC1, TNC2; upravená
 	kopie IZ7BOJ ve složce `lora_tnc/`) a LinBPQ (uzel a BBS) ze záložky BPQ,
-	včetně startu po zapnutí Pi se zpožděním; BBS lze napojit na místní
-	Postfix jako e-mailovou bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
+	včetně startu po zapnutí Pi se zpožděním. Web vytvoří i `bpq32.cfg`
+	(uzel, Telnet/web, KISS port pro každý TNC, BBS) a ukáže výpis služeb
+	a živý provoz RX/TX. BBS lze napojit na místní Postfix jako e-mailovou
+	bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
 - Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Formát zpráv
@@ -273,5 +275,6 @@ Postfix a Dovecot se aktualizují samostatně podle [INSTALL.md](INSTALL.md).
 - `webapp.py` – Flask webové rozhraní a validace webového formuláře
 - `common.py` – konfigurace, SQLite, Maildir a heartbeat
 - `system_time.py` – časové pásmo, NTP a ruční čas přes `timedatectl`
+- `bpq_services.py`, `bpq_config.py` – služby TNC a LinBPQ, generování `bpq32.cfg`
 - `templates/`, `static/` – šablony a styly webu
 - `systemd/` – produkční jednotky pro gateway a web

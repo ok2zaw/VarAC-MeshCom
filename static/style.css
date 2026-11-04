@@ -472,4 +472,5 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 .log-controls select { margin-left: 4px; }
 .log-note { color: var(--text-muted); font-size: 12px; }
 .service-log { height: 420px; margin: 0 0 6px; padding: 8px 10px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text-2); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
-
+.config-form label.wide { grid-column: 1 / -1; }
+.config-form textarea { display: block; width: 100%; margin-top: 4px; padding: 0.4rem 0.55rem; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font: 12px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }

@@ -1297,14 +1297,43 @@ sudo systemctl disable --now bpq.service linbpq.service 2>/dev/null || true
 
 ### 12.4 Základní konfigurace `bpq32.cfg`
 
-Vytvořte `/home/ok2zaw/linbpq/bpq32.cfg` (volací znaky, lokátor a hesla upravte).
-Každý TNC je v LinBPQ samostatný port s vlastním TCP portem:
+LinBPQ potřebuje v adresáři programu soubor `bpq32.cfg` (na velikosti písmen
+v názvu záleží). Instalační skript ho nevytváří.
+
+**Přes web (doporučeno).** Na záložce **BPQ** vyplňte sekci *Konfigurace
+LinBPQ (bpq32.cfg)*:
+
+| Položka | Příklad | Poznámka |
+| --- | --- | --- |
+| Značka a alias uzlu | `OK2ZAW-7`, `ZAWNOD` | alias 1–6 znaků |
+| Lokátor | `JN89AA` | nepovinné, pro mapu uzlů |
+| Informační a uvítací text | | `INFOMSG` (příkaz `I`) a `CTEXT` |
+| Telnet port, port webu | `8010`, `8008` | nesmí se shodovat s KISS porty TNC |
+| Místní síť | `192.168.99.0/24` | `LOCALNET`, nepovinné |
+| Uživatel, heslo a značka sysopa | `sysop`, …, `OK2ZAW` | heslo bez mezer, čárky a středníku |
+| BBS | `OK2ZAW-1`, `ZAWBBS` | jiné SSID a alias než uzel |
+| Port AX.25 pro TNC1/TNC2 | `PACLEN 128`, `MAXFRAME 1`, `FRACK 20000`, `RESPTIME 1000`, `RETRIES 10` | jen pro povolené TNC |
+
+Tlačítko **Uložit a zapsat bpq32.cfg** soubor vytvoří a nastaví mu práva
+`0600`. KISS porty se berou z nastavení TNC1/TNC2 výše na téže záložce.
+Existující soubor se nejdřív zazálohuje jako `bpq32.cfg.bak-<datum>`. Heslo
+sysopa se ukládá jen do `bpq32.cfg`, ne do `config.json`. Prázdné pole hesla při
+dalším uložení ponechá heslo, které už v souboru je. Pod formulářem je náhled
+souboru se skrytým heslem. Po zápisu LinBPQ restartujte.
+
+Web soubor při každém uložení přepíše celý. Ruční úpravy proto dělejte jen
+tehdy, když formulář nepoužíváte, nebo je převezměte ze zálohy.
+
+**Ručně.** Vygenerovaný soubor vypadá takto (značky, lokátor a heslo upravte):
 
 ```text
 SIMPLE
 NODECALL=OK2ZAW-7
 NODEALIAS=ZAWNOD
 LOCATOR=JN89AA
+NODE=1
+BBS=1
+
 INFOMSG:
 OK2ZAW-7 LinBPQ uzel s BBS pres LoRa
 ***
@@ -1314,9 +1343,10 @@ PORT
  ID=Telnet a web
  DRIVER=TELNET
  CONFIG
-  LOGGINGLEVEL=1
-  HTTPPORT=8008
+  LOGGING=1
+  DisconnectOnClose=1
   TCPPORT=8010
+  HTTPPORT=8008
   MAXSESSIONS=10
   USER=sysop,SILNE_HESLO,OK2ZAW,,SYSOP
 ENDPORT
@@ -1328,7 +1358,6 @@ PORT
  PROTOCOL=KISS
  IPADDR=127.0.0.1
  TCPPORT=10001
- CHANNEL=A
  PACLEN=128
  MAXFRAME=1
  FRACK=20000
@@ -1343,7 +1372,6 @@ PORT
  PROTOCOL=KISS
  IPADDR=127.0.0.1
  TCPPORT=10002
- CHANNEL=A
  PACLEN=128
  MAXFRAME=1
  FRACK=20000
@@ -1355,18 +1383,24 @@ APPLICATION 1,BBS,,OK2ZAW-1,ZAWBBS,255
 LINMAIL
 ```
 
-- `IPADDR` a `TCPPORT` místo `COMPORT` připojí KISS port přes TCP k TNC;
-  `TCPPORT` musí odpovídat portu TNC1/TNC2 na záložce BPQ.
+Ručně vytvořený soubor chraňte: `chmod 600 /home/ok2zaw/linbpq/bpq32.cfg`.
+
+- `IPADDR` a `TCPPORT` místo `COMPORT` připojí KISS port přes TCP k TNC
+  (dokumentace G8BPQ, KISS.html); `TCPPORT` musí odpovídat portu TNC1/TNC2 na
+  záložce BPQ.
 - TNC přijímá vždy jen jedno TCP spojení – k jednomu TNC se smí připojit jen
   LinBPQ, ne současně další program (aprx, Direwolf).
-- `FRACK=20000` (ms) a `MAXFRAME=1` odpovídají pomalému LoRa kanálu: krátký
-  rámec trvá při SF12/BW125 asi 1,3 s, rámec 128 bajtů přes 4 s. `FRACK` je
-  čas do opakování nepotvrzeného rámce – každá ztráta proto zdrží relaci o
-  tuto dobu.
-- `RESPTIME=1000` (ms) je čekání před odesláním potvrzení. Vyšší hodnota
-  (např. 3000) přidává zpoždění ke každé výměně rámců.
-- `LINMAIL` zapne poštovní server (BBS); `APPLICATION` zpřístupní BBS pod
-  volacím znakem `OK2ZAW-1`.
+- Všechny časy jsou v milisekundách. `FRACK=20000` a `MAXFRAME=1` odpovídají
+  pomalému LoRa kanálu: krátký rámec trvá při SF12/BW125 asi 1,3 s, rámec
+  128 bajtů přes 4 s. `FRACK` je čas do opakování nepotvrzeného rámce – každá
+  ztráta proto zdrží relaci o tuto dobu.
+- `RESPTIME=1000` je čekání před odesláním potvrzení. Vyšší hodnota (např.
+  3000) přidává zpoždění ke každé výměně rámců.
+- `USER=jméno,heslo,značka,,SYSOP` – jméno a heslo rozlišují velikost písmen.
+  Uživatel s příznakem `SYSOP` smí spravovat uzel přes web LinBPQ.
+- `LINMAIL` zapne poštovní server (BBS); `APPLICATION` ho zpřístupní pod
+  volacím znakem `OK2ZAW-1`. Konfigurace BBS (`linmail.cfg`) se vytvoří při
+  prvním startu a nastavuje se ve webu LinBPQ – číslo aplikace BBS musí být 1.
 - Web LinBPQ (8008) a telnet (8010) zpřístupněte jen v LAN/VPN.
 
 Vyzkoušejte ruční spuštění (nejdřív musí běžet TNC z kroku 12.2), otevřete
