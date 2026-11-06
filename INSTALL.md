@@ -681,8 +681,19 @@ Logy předchozího běhu pak zobrazí `journalctl -b -1 -n 50`.
 ### 9.3 Diagnostika příjmu RF stanic
 
 Stránka **RF stanice** ukládá jen rámce přijaté přes LoRa (`src_type` =
-`lora`) typu `pos`, `msg` a `tele`, které neodeslal vlastní uzel. Pokud zůstává
-prázdná:
+`lora`) typu `pos`, `msg` a `tele`, které neodeslal vlastní uzel.
+
+I rámec typu `lora` mohl přijít z internetu: jiná brána ho dostala ze serveru
+MeshCom a vyslala do LoRa. ExtUDP JSON příznak „ze serveru“ nenese, proto
+stránka ve výchozím režimu **jen RF** skryje rámce, jejichž cesta má víc než
+`stations_max_hops` přeskoků (výchozí 4, počítají se převaděče mezi stanicí a
+uzlem), nebo ve které jsou dvě stanice se známou polohou dál od sebe, než
+zvládne LoRa: n přeskoků smí pokrýt nejvýš n × `stations_max_link_km`
+(výchozí 250 km). Obě hodnoty se nastavují v `config.json`. Skryté stanice
+s důvodem jsou pod tabulkou stanic; volba *Cesty → vše včetně internetu*
+zobrazí všechno. Data se nemažou, filtr působí jen na zobrazení.
+
+Pokud stránka zůstává prázdná:
 
 1. Na stránce **Stav** zkontrolujte kartu *UDP příjem*:
    - `RF pozorování` – ukládání funguje,

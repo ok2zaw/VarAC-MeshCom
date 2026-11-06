@@ -21,6 +21,8 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	poslední výsledek; stavová stránka se obnovuje každých 10 sekund.
 - Prohlížet RF stanice slyšené přes LoRa, jejich historii s filtrem data od/do,
 	RSSI/SNR, polohu, baterii, relay cestu a dostupnou senzorovou telemetrii.
+	Ve výchozím režimu jen stanice dosažitelné přes RF (nejvýš 4 přeskoky, bez
+	skoků přes internet).
 	Historie se začne plnit až po zapnutí ExtUDP a nasazení této verze. Na uzlu
 	musí být ExtUDP zapnuté (`--extudp on`) a cílová IP nastavená na Raspberry Pi
 	(`--extudpip <IP-Raspberry-Pi>`). Formát paketů popisuje [MeshCom ExtUDP

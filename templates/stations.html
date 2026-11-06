@@ -23,6 +23,7 @@
 
 <h1>RF stanice</h1>
 <p class="monitor-note">Záznamy stanic obsahují pouze rámce přijaté přes LoRa; textové zprávy najdete na stránce <a href="{{ url_for('mesh_messages') }}">Mesh zprávy</a>. RSSI/SNR se vztahuje k přijatému RF hopu; jednotka výšky závisí na vysílajícím uzlu.</p>
+<p class="monitor-note">Režim „jen RF“ skryje rámce, které přišly přes víc než {{ max_hops }} přeskoky (převaděče mezi stanicí a uzlem), nebo jejichž cesta obsahuje skok delší než {{ '%g'|format(max_link_km) }} km – takové rámce vzala jiná brána z internetu a vyslala je do LoRa. Délka skoku se dá posoudit jen u stanic se známou polohou; limity lze změnit v config.json (<code>stations_max_hops</code>, <code>stations_max_link_km</code>).</p>
 
 <form method="get" class="station-filter">
   <label>Od
@@ -30,6 +31,12 @@
   </label>
   <label>Do
     <input type="date" name="end" value="{{ end_date }}" required>
+  </label>
+  <label>Cesty
+    <select name="paths">
+      <option value="rf" {{ 'selected' if paths_mode == 'rf' }}>jen RF (≤ {{ max_hops }} přeskoky)</option>
+      <option value="all" {{ 'selected' if paths_mode == 'all' }}>vše včetně internetu</option>
+    </select>
   </label>
   {% if selected_station %}<input type="hidden" name="station" value="{{ selected_station }}">{% endif %}
   <button type="submit">Filtrovat</button>
@@ -44,6 +51,7 @@
   <span class="legend-dot legend-relay"></span>přes převaděč
   <span class="legend-dot legend-own"></span>vlastní uzel
   <span class="legend-dot legend-old"></span>převaděč, starší poloha
+  · <span class="legend-line"></span>spojení bez RSSI a cesty přes uzly
   · plná čára = poslední skok k uzlu, čárkovaná = cesty přes převaděče, tečkovaná = přes uzel bez polohy, modrá = cesty vybrané stanice
   · 🟢 do 45 min, 🟡 do 2 h, ⚪ déle (průhledná)
   {% if not map_stations %}· v tomto období žádná stanice neposlala polohu{% endif %}
@@ -59,6 +67,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="start" value="{{ start_date }}">
       <input type="hidden" name="end" value="{{ end_date }}">
+      {% if paths_arg %}<input type="hidden" name="paths" value="{{ paths_arg }}">{% endif %}
       <button type="submit" name="action" value="clear" class="link-button">zrušit{% if node_position %} a použít maják uzlu{% endif %}</button>
     </form>
   {% elif own_position %}
@@ -81,8 +90,8 @@
     <tbody>
       {% for row in summary %}
       <tr>
-        <td><span class="presence" title="{{ row.presence_label }} – {{ row.age_label }}">{{ row.presence_icon }}</span> <a href="{{ url_for('stations', start=start_date, end=end_date, station=row.station) }}#station-history">{{ row.station }}</a></td>
-        <td title="{{ row.source_path }}">{{ row.heard_from }}</td>
+        <td><span class="presence" title="{{ row.presence_label }} – {{ row.age_label }}">{{ row.presence_icon }}</span> <a href="{{ url_for('stations', start=start_date, end=end_date, station=row.station, paths=paths_arg) }}#station-history">{{ row.station }}</a></td>
+        <td title="{{ row.source_path }}">{{ row.heard_from }}{% if row.hops %} <span class="card-sub">({{ row.hops }} přesk.)</span>{% endif %}{% if row.path_problem %} <span title="pravděpodobně přes internet">🌐</span>{% endif %}</td>
         <td>{{ row.observations }}</td>
         <td>{{ row.first_seen_label }}</td>
         <td>{{ row.last_seen_label }}</td>
@@ -98,13 +107,35 @@
         <td>{{ telemetry_values(row) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="15">V tomto období zatím nejsou žádná RF pozorování.</td></tr>
+      <tr><td colspan="15">V tomto období zatím nejsou žádná RF pozorování{% if hidden_stations %} dosažitelná přes RF{% endif %}.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% if hidden_stations %}
+<details class="hidden-stations">
+  <summary>Skryto {{ hidden_stations|length }} stanic přijatých jen přes internet nebo přes víc než {{ max_hops }} přeskoky
+    (<a href="{{ url_for('stations', start=start_date, end=end_date, station=selected_station or None, paths='all') }}">zobrazit vše</a>)</summary>
+  <div class="table-wrap">
+    <table class="msg-table station-table">
+      <thead><tr><th>Stanice</th><th>Poslední cesta</th><th>Důvod</th><th>Rámce</th><th>Naposledy</th></tr></thead>
+      <tbody>
+        {% for row in hidden_stations %}
+        <tr>
+          <td>{{ row.station }}</td>
+          <td>{{ row.source_path }}</td>
+          <td>{{ row.problem_label }}</td>
+          <td>{{ row.observations }}</td>
+          <td>{{ row.last_seen_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+{% endif %}
 
-<h2 id="station-history">Historie{% if selected_station %}: {{ selected_station }} <a class="clear-filter" href="{{ url_for('stations', start=start_date, end=end_date) }}">zobrazit všechny</a>{% endif %}</h2>
+<h2 id="station-history">Historie{% if selected_station %}: {{ selected_station }} <a class="clear-filter" href="{{ url_for('stations', start=start_date, end=end_date, paths=paths_arg) }}">zobrazit všechny</a>{% endif %}</h2>
 <p class="card-sub">{{ history_count }} záznamů v období; zobrazeno nejvýše 500 nejnovějších.</p>
 <div class="table-wrap">
   <table class="msg-table station-table">
@@ -118,7 +149,7 @@
         <td>{{ row.station }}</td>
         <td>{{ row.packet_type }}</td>
         <td>{{ row.heard_from }}</td>
-        <td title="{{ row.source_path }}">{{ row.source_path }}</td>
+        <td title="{{ row.hops }} přeskoků">{{ row.source_path }}{% if row.path_problem %} <span title="pravděpodobně přes internet">🌐</span>{% endif %}</td>
         <td>{% if row.rssi is not none %}{{ row.rssi }} dBm{% else %}—{% endif %}</td>
         <td>{% if row.snr is not none %}{{ row.snr }} dB{% else %}—{% endif %}</td>
         <td>{% if row.latitude is not none and row.longitude is not none %}{{ '%.4f'|format(row.latitude) }}, {{ '%.4f'|format(row.longitude) }}{% else %}—{% endif %}</td>
@@ -152,6 +183,7 @@
     csrf: {{ csrf_token()|tojson }},
     start: {{ start_date|tojson }},
     end: {{ end_date|tojson }},
+    paths: {{ paths_arg|tojson }},
   };
   const map = L.map(container, { scrollWheelZoom: false });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -161,7 +193,9 @@
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const signalColor = (rssi) => rssi == null ? "#8a8a8a" : rssi >= -95 ? "#2e9d4f" : rssi >= -110 ? "#dba41c" : "#d9622b";
+  // Links use --accent-hover, a shade apart from the −95…−110 dBm gold, so they stand out on the map tiles.
+  const linkColor = getComputedStyle(document.documentElement).getPropertyValue("--accent-hover").trim() || "#c0910f";
+  const signalColor = (rssi) => rssi == null ? linkColor : rssi >= -95 ? "#2e9d4f" : rssi >= -110 ? "#dba41c" : "#d9622b";
   const toRad = (deg) => deg * Math.PI / 180;
   const distanceKm = (a, b) => {
     const h = Math.sin(toRad(b[0] - a[0]) / 2) ** 2 +
@@ -235,7 +269,7 @@
   // On demand: every distinct path heard in the period, through all relays.
   const routes = addGroup(false);
   drawPaths(routes, stationPaths.map((p) => ({ path: pathOf(p.source_path) })),
-    (lastHop) => ({ color: "#55606e", weight: 2.5, opacity: 0.9, dashArray: lastHop ? null : "8 5" }));
+    (lastHop) => ({ color: linkColor, weight: 2.5, opacity: 0.9, dashArray: lastHop ? null : "8 5" }));
 
   // Paths of the station whose popup is open.
   const selected = addGroup(true);
@@ -262,7 +296,7 @@
   }
   for (const s of stations) {
     const point = [s.latitude, s.longitude];
-    const color = s.direct ? signalColor(s.rssi) : "#8a8a8a";
+    const color = s.direct && s.rssi != null ? signalColor(s.rssi) : "#8a8a8a";
     const fade = s.presence === "gone" ? 0.35 : 1;
     const signal = s.rssi != null ? `${s.rssi} dBm${s.snr != null ? ` / ${s.snr} dB` : ""}` : "—";
     const otherPaths = stationPaths.filter((p) => p.station === s.station && p.source_path !== s.source_path);
@@ -317,6 +351,7 @@
       `<input type="hidden" name="csrf_token" value="${esc(positionForm.csrf)}">` +
       `<input type="hidden" name="start" value="${esc(positionForm.start)}">` +
       `<input type="hidden" name="end" value="${esc(positionForm.end)}">` +
+      (positionForm.paths ? `<input type="hidden" name="paths" value="${esc(positionForm.paths)}">` : "") +
       `<input type="hidden" name="latitude" value="${lat}">` +
       `<input type="hidden" name="longitude" value="${lng}">` +
       `<strong>${lat}, ${lng}</strong><br>` +

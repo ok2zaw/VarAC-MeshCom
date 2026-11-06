@@ -334,11 +334,23 @@ def stations():
     cfg = common.load_config()
     start_day, end_day, since, until = parse_date_range(default_days=30, cfg=cfg)
     selected_station = request.args.get("station", "").strip().upper()
-    summary = common.get_station_summary(since, until)
-    history_count = common.count_station_history(since, until, selected_station)
-    history = common.get_station_history(since, until, selected_station, limit=500)
-
+    # Default: only stations reachable over LoRa; "all" also shows frames a gateway took from the internet.
+    paths_mode = "all" if request.args.get("paths") == "all" else "rf"
+    own_callsign = str(cfg.get("callsign", "")).strip().upper()
     own_position = common.get_own_position()
+    max_hops, max_link_km = common.station_path_limits(cfg)
+    path_check = common.rf_path_checker(until, own_callsign, own_position, max_hops, max_link_km)
+    active_check = path_check if paths_mode == "rf" else None
+    summary = common.get_station_summary(since, until, path_check=active_check)
+    history_count = common.count_station_history(since, until, selected_station, path_check=active_check)
+    history = common.get_station_history(since, until, selected_station, limit=500, path_check=active_check)
+    hidden_stations = common.get_hidden_stations(since, until, path_check) if paths_mode == "rf" else []
+    for row in hidden_stations:
+        row["problem_label"] = common.RF_PATH_PROBLEMS[row["problem"]].format(
+            max_hops=max_hops, max_link_km=max_link_km)
+        row["last_seen_label"] = format_ts(row["last_seen"], cfg)
+    paths_arg = "all" if paths_mode == "all" else None  # keeps the mode in links; None drops the argument
+
     now = time.time()
     map_stations = []
     for row in summary:
@@ -348,6 +360,8 @@ def stations():
         row["first_seen_label"] = format_ts(row["first_seen"], cfg)
         row["last_seen_label"] = format_ts(row["last_seen"], cfg)
         row["direct"] = row["heard_from"] == row["station"]
+        row["hops"] = len(common.path_calls(row["source_path"])) - 1
+        row["path_problem"] = path_check(row["source_path"])
         row["distance_km"] = None
         if row["latitude"] is None or row["longitude"] is None:
             continue
@@ -360,12 +374,13 @@ def stations():
                 "snr", "altitude", "battery_percent", "last_seen_label", "distance_km", "observations",
                 "presence", "presence_icon", "presence_label", "age_label")
         } | {"url": url_for("stations", start=start_day.isoformat(), end=end_day.isoformat(),
-                            station=row["station"], _anchor="station-history")})
+                            station=row["station"], paths=paths_arg, _anchor="station-history")})
     for row in history:
         row["observed_at_label"] = format_ts(row["observed_at"], cfg)
+        row["hops"] = len(common.path_calls(row["source_path"])) - 1
+        row["path_problem"] = path_check(row["source_path"])
 
-    own_callsign = str(cfg.get("callsign", "")).strip().upper()
-    station_paths = common.get_station_paths(since, until)
+    station_paths = common.get_station_paths(since, until, path_check=active_check)
     # Relays without a position in the period: use their last known beacon so paths stay connected.
     placed = {row["station"] for row in map_stations} | {own_callsign}
     missing = {call for row in station_paths for call in row["source_path"].split(",")} - placed
@@ -391,6 +406,11 @@ def stations():
         selected_station=selected_station,
         start_date=start_day.isoformat(),
         end_date=end_day.isoformat(),
+        paths_mode=paths_mode,
+        paths_arg=paths_arg,
+        hidden_stations=hidden_stations,
+        max_hops=max_hops,
+        max_link_km=max_link_km,
     )
 
 
@@ -398,7 +418,7 @@ def stations():
 @requires_auth
 def station_position():
     require_csrf_token()
-    back = {key: request.form[key] for key in ("start", "end") if request.form.get(key)}
+    back = {key: request.form[key] for key in ("start", "end", "paths") if request.form.get(key)}
     if request.form.get("action") == "clear":
         common.clear_manual_position()
         flash("Ruční poloha zrušena; vzdálenosti se měří od polohy z majáku uzlu.", "success")

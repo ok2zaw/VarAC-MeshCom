@@ -55,6 +55,9 @@ DEFAULT_CONFIG = {
     "email_part_delay_seconds": 5,
     "callsign": "OK2ZAW-10",
     "display_utc": False,          # web shows times in UTC instead of the Pi's time zone
+    # Stations page: paths with more relays, or with a link longer than LoRa can bridge, came via the internet.
+    "stations_max_hops": 4,
+    "stations_max_link_km": 250,
     "web_username": "admin",
     "web_password": "changeme",
     "radio_display": ":0",
@@ -745,6 +748,85 @@ def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 6371.0 * 2 * math.asin(math.sqrt(a))
 
 
+# MeshCom's ExtUDP JSON does not carry the frame's "from server" flag, so a frame a remote
+# gateway took from the internet and put on air arrives as src_type "lora" like any other.
+# It is recognised by its path: too many relays, or two stations farther apart than LoRa reaches.
+STATION_MAX_HOPS = 4
+STATION_MAX_LINK_KM = 250.0
+RF_PATH_PROBLEMS = {
+    "hops": "víc než {max_hops} přeskoky",
+    "distance": "skok delší než {max_link_km:g} km (internet)",
+}
+
+
+def path_calls(source_path) -> list[str]:
+    return [part.strip().upper() for part in str(source_path or "").split(",") if part.strip()]
+
+
+def rf_path_problem(source_path, positions: dict, own_callsign: str = "",
+                    max_hops: int = STATION_MAX_HOPS, max_link_km: float = STATION_MAX_LINK_KM) -> str | None:
+    """None if the path can be pure LoRa, else "hops" or "distance".
+
+    Hops are the relays between the origin and the own node ("A" = heard directly = 0,
+    "A,B" = 1). Each pair of stations with a known position in the chain origin, relays...,
+    own node must be reachable over the hops between them: n hops cover at most
+    n * max_link_km, so a gap without positions does not hide an internet jump either.
+    """
+    calls = path_calls(source_path)
+    if len(calls) - 1 > max_hops:
+        return "hops"
+    chain = calls + ([own_callsign.strip().upper()] if own_callsign else [])
+    known = [(index, positions[call]) for index, call in enumerate(chain) if call in positions]
+    for a, (i, first) in enumerate(known):
+        for j, second in known[a + 1:]:
+            if j > i and distance_km(*first, *second) > (j - i) * max_link_km:
+                return "distance"
+    return None
+
+
+def station_path_limits(cfg: dict) -> tuple[int, float]:
+    """(max_hops, max_link_km) from the config, falling back to the defaults."""
+    try:
+        max_hops = max(0, min(15, int(cfg.get("stations_max_hops", STATION_MAX_HOPS))))
+    except (TypeError, ValueError):
+        max_hops = STATION_MAX_HOPS
+    try:
+        max_link_km = float(cfg.get("stations_max_link_km", STATION_MAX_LINK_KM))
+        if not math.isfinite(max_link_km) or max_link_km <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        max_link_km = STATION_MAX_LINK_KM
+    return max_hops, max_link_km
+
+
+def rf_path_checker(until: float, own_callsign: str = "", own_position: dict | None = None,
+                    max_hops: int = STATION_MAX_HOPS, max_link_km: float = STATION_MAX_LINK_KM):
+    """Cached source_path -> problem (None = RF) using every station's last position before `until`."""
+    positions = {call: (row["latitude"], row["longitude"])
+                 for call, row in get_last_positions(None, until).items()}
+    own_callsign = str(own_callsign or "").strip().upper()
+    if own_callsign and own_position:
+        positions[own_callsign] = (own_position["latitude"], own_position["longitude"])
+    cache = {}
+
+    def check(source_path):
+        if source_path not in cache:
+            cache[source_path] = rf_path_problem(source_path, positions, own_callsign, max_hops, max_link_km)
+        return cache[source_path]
+
+    check.max_hops = max_hops
+    check.max_link_km = max_link_km
+    return check
+
+
+def _station_db(path_check=None) -> sqlite3.Connection:
+    """Connection with rf_path_ok(source_path) for filtering; always true without a checker."""
+    conn = get_db()
+    conn.create_function("rf_path_ok", 1, lambda path: 1 if path_check is None or path_check(path) is None else 0,
+                         deterministic=True)
+    return conn
+
+
 def record_station_observation(packet: dict, own_callsign: str = "") -> bool:
     packet_type = packet.get("type")
     if packet.get("src_type") != "lora" or not isinstance(packet_type, str) or packet_type not in {"pos", "msg", "tele"}:
@@ -1112,13 +1194,13 @@ def count_heard_rf_messages(since: float, until: float, channel: str = "", kind:
         conn.close()
 
 
-def get_station_paths(since: float, until: float, limit: int = 1000) -> list[dict]:
+def get_station_paths(since: float, until: float, limit: int = 1000, path_check=None) -> list[dict]:
     """Distinct RF paths (origin,relays...,heard_from) per station in the period, newest first."""
-    conn = get_db()
+    conn = _station_db(path_check)
     try:
         rows = conn.execute(
             "SELECT station, source_path, COUNT(*) AS observations, MAX(observed_at) AS last_seen "
-            "FROM station_observations WHERE observed_at >= ? AND observed_at < ? "
+            "FROM station_observations WHERE observed_at >= ? AND observed_at < ? AND rf_path_ok(source_path) "
             "GROUP BY station, source_path ORDER BY last_seen DESC LIMIT ?",
             (since, until, limit),
         ).fetchall()
@@ -1127,34 +1209,49 @@ def get_station_paths(since: float, until: float, limit: int = 1000) -> list[dic
         conn.close()
 
 
+def get_hidden_stations(since: float, until: float, path_check, limit: int = 500) -> list[dict]:
+    """Stations heard in the period only over paths the checker rejects, with their newest path."""
+    stations = {}
+    for row in get_station_paths(since, until, limit=100000):  # newest path of each station first
+        entry = stations.setdefault(row["station"], {**row, "observations": 0, "problem": None, "rf": False})
+        entry["observations"] += row["observations"]
+        problem = path_check(row["source_path"])
+        if problem is None:
+            entry["rf"] = True
+        elif entry["problem"] is None:
+            entry["problem"] = problem
+    return [entry for entry in stations.values() if not entry["rf"]][:limit]
+
+
 def get_last_positions(stations, until: float) -> dict[str, dict]:
     """Newest position beacon of each station before `until`, regardless of the period start.
 
-    Used for relays in a path that sent no position in the shown period.
+    Used for relays in a path that sent no position in the shown period; stations=None means all.
     """
-    stations = sorted({str(s).strip().upper() for s in stations if str(s).strip()})
-    if not stations:
-        return {}
+    query = ("SELECT station, latitude, longitude, MAX(observed_at) AS observed_at "
+             "FROM station_observations WHERE packet_type = 'pos' AND latitude IS NOT NULL "
+             "AND longitude IS NOT NULL AND observed_at < ?")
+    params = [until]
+    if stations is not None:
+        stations = sorted({str(s).strip().upper() for s in stations if str(s).strip()})
+        if not stations:
+            return {}
+        query += f" AND station IN ({','.join('?' * len(stations))})"
+        params.extend(stations)
     conn = get_db()
     try:
         # SQLite returns the other columns from the row holding MAX(observed_at).
-        rows = conn.execute(
-            "SELECT station, latitude, longitude, MAX(observed_at) AS observed_at "
-            "FROM station_observations WHERE packet_type = 'pos' AND latitude IS NOT NULL "
-            f"AND longitude IS NOT NULL AND observed_at < ? AND station IN ({','.join('?' * len(stations))}) "
-            "GROUP BY station",
-            (until, *stations),
-        ).fetchall()
+        rows = conn.execute(query + " GROUP BY station", params).fetchall()
         return {row["station"]: dict(row) for row in rows}
     finally:
         conn.close()
 
 
-def get_station_summary(since: float, until: float, limit: int = 500) -> list[dict]:
+def get_station_summary(since: float, until: float, limit: int = 500, path_check=None) -> list[dict]:
     query = """
         WITH filtered AS (
             SELECT * FROM station_observations
-            WHERE observed_at >= ? AND observed_at < ?
+            WHERE observed_at >= ? AND observed_at < ? AND rf_path_ok(source_path)
         ),
         stats AS (
             SELECT station, COUNT(*) AS observations,
@@ -1208,7 +1305,7 @@ def get_station_summary(since: float, until: float, limit: int = 500) -> list[di
         ORDER BY stats.last_seen DESC
         LIMIT ?
     """
-    conn = get_db()
+    conn = _station_db(path_check)
     try:
         rows = conn.execute(query, (since, until, max(1, min(limit, 1000)))).fetchall()
         return [dict(row) for row in rows]
@@ -1217,10 +1314,10 @@ def get_station_summary(since: float, until: float, limit: int = 500) -> list[di
 
 
 def get_station_history(since: float, until: float, station: str = "",
-                        limit: int = 500, offset: int = 0) -> list[dict]:
+                        limit: int = 500, offset: int = 0, path_check=None) -> list[dict]:
     query = (
         "SELECT * FROM station_observations "
-        "WHERE observed_at >= ? AND observed_at < ?"
+        "WHERE observed_at >= ? AND observed_at < ? AND rf_path_ok(source_path)"
     )
     params = [since, until]
     if station:
@@ -1229,7 +1326,7 @@ def get_station_history(since: float, until: float, station: str = "",
     query += " ORDER BY observed_at DESC, id DESC LIMIT ? OFFSET ?"
     params.extend((max(1, min(limit, 1000)), max(0, offset)))
 
-    conn = get_db()
+    conn = _station_db(path_check)
     try:
         rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
@@ -1237,14 +1334,15 @@ def get_station_history(since: float, until: float, station: str = "",
         conn.close()
 
 
-def count_station_history(since: float, until: float, station: str = "") -> int:
-    query = "SELECT COUNT(*) FROM station_observations WHERE observed_at >= ? AND observed_at < ?"
+def count_station_history(since: float, until: float, station: str = "", path_check=None) -> int:
+    query = ("SELECT COUNT(*) FROM station_observations "
+             "WHERE observed_at >= ? AND observed_at < ? AND rf_path_ok(source_path)")
     params = [since, until]
     if station:
         query += " AND station = ?"
         params.append(station.strip().upper())
 
-    conn = get_db()
+    conn = _station_db(path_check)
     try:
         return conn.execute(query, params).fetchone()[0]
     finally:

@@ -397,9 +397,74 @@ class GatewayEmailTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         expected_start = datetime(2026, 10, 1).timestamp()
         expected_end = datetime(2026, 10, 31).timestamp()
-        summary.assert_called_once_with(expected_start, expected_end)
-        count_history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1")
-        history.assert_called_once_with(expected_start, expected_end, "OK1AAA-1", limit=500)
+        self.assertEqual(summary.call_args.args, (expected_start, expected_end))
+        self.assertEqual(count_history.call_args.args, (expected_start, expected_end, "OK1AAA-1"))
+        self.assertEqual(history.call_args.args, (expected_start, expected_end, "OK1AAA-1"))
+        self.assertEqual(history.call_args.kwargs["limit"], 500)
+        # Only RF paths by default
+        self.assertIsNotNone(summary.call_args.kwargs["path_check"])
+
+    def test_rf_path_problem_limits_hops_and_link_distance(self):
+        positions = {"OK1AAA-1": (50.08, 14.42), "OK2RPT-9": (49.75, 15.00), "DL1FAR-1": (52.52, 13.40),
+                     "OK9NODE-1": (49.20, 16.61)}
+        check = common.rf_path_problem
+        self.assertIsNone(check("OK1AAA-1", positions, "OK9NODE-1"))                     # direct, 185 km
+        self.assertIsNone(check("OK1AAA-1,OK2RPT-9", positions, "OK9NODE-1"))
+        self.assertIsNone(check("OK5A-1,OK5B-1,OK5C-1,OK5D-1,OK5E-1", {}, "OK9NODE-1"))  # 4 hops
+        self.assertEqual(check("OK5A-1,OK5B-1,OK5C-1,OK5D-1,OK5E-1,OK5F-1", {}, "OK9NODE-1"), "hops")
+        # Berlin - Brno ~ 480 km: no single LoRa hop, but two unknown relays could bridge it
+        self.assertEqual(check("DL1FAR-1,OK2RPT-9", positions, "OK9NODE-1"), "distance")
+        self.assertEqual(check("DL1FAR-1", positions, "OK9NODE-1"), "distance")
+        self.assertIsNone(check("DL1FAR-1,OK5X-1", positions, "OK9NODE-1"))
+        self.assertEqual(check("OK1AAA-1", positions, "OK9NODE-1", max_link_km=100), "distance")
+        self.assertIsNone(check("OK5A-1,OK5B-1", {}, "", max_hops=1))
+
+    def test_station_queries_filter_internet_paths(self):
+        rows = [("OK1AAA-1", "OK1AAA-1", "pos", 50.08, 14.42, 100.0),
+                ("DL1FAR-1", "DL1FAR-1,DB0GW-12", "pos", 53.55, 9.99, 200.0),
+                ("OK3LONG-1", "OK3LONG-1,OK5A-1,OK5B-1,OK5C-1,OK5D-1,OK5E-1", "msg", None, None, 300.0),
+                ("OK1AAA-1", "OK1AAA-1,OK5A-1,OK5B-1,OK5C-1,OK5D-1,OK5E-1", "msg", None, None, 400.0)]
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
+            common.init_db()
+            conn = common.get_db()
+            for station, path, kind, lat, lon, ts in rows:
+                conn.execute(
+                    "INSERT INTO station_observations (observed_at, station, heard_from, source_path, "
+                    "src_type, packet_type, latitude, longitude) VALUES (?, ?, ?, ?, 'lora', ?, ?, ?)",
+                    (ts, station, path.split(",")[-1], path, kind, lat, lon))
+            conn.commit()
+            conn.close()
+            check = common.rf_path_checker(1000, "OK9NODE-1", {"latitude": 49.20, "longitude": 16.61})
+            summary = common.get_station_summary(0, 1000, path_check=check)
+            everything = common.get_station_summary(0, 1000)
+            history = common.get_station_history(0, 1000, path_check=check)
+            count = common.count_station_history(0, 1000, path_check=check)
+            paths = common.get_station_paths(0, 1000, path_check=check)
+            hidden = common.get_hidden_stations(0, 1000, check)
+
+        self.assertEqual([row["station"] for row in summary], ["OK1AAA-1"])
+        self.assertEqual(summary[0]["observations"], 1)
+        self.assertEqual(summary[0]["source_path"], "OK1AAA-1")
+        self.assertEqual(len(everything), 3)
+        self.assertEqual(([row["source_path"] for row in history], count), (["OK1AAA-1"], 1))
+        self.assertEqual([row["source_path"] for row in paths], ["OK1AAA-1"])
+        self.assertEqual([(row["station"], row["problem"]) for row in hidden],
+                         [("OK3LONG-1", "hops"), ("DL1FAR-1", "distance")])
+
+    def test_station_page_can_show_all_paths(self):
+        with patch.object(webapp.common, "load_config", return_value={"web_password": ""}), \
+             patch.object(webapp.common, "get_station_summary", return_value=[]) as summary, \
+             patch.object(webapp.common, "count_station_history", return_value=0), \
+             patch.object(webapp.common, "get_station_history", return_value=[]), \
+             patch.object(webapp.common, "get_own_position", return_value=None), \
+             patch.object(webapp.common, "get_node_position", return_value=None), \
+             patch.object(webapp.common, "get_last_positions", return_value={}), \
+             patch.object(webapp.common, "get_station_paths", return_value=[]):
+            page = webapp.app.test_client().get("/stations?paths=all").get_data(as_text=True)
+
+        self.assertIsNone(summary.call_args.kwargs["path_check"])
+        self.assertIn('<option value="all" selected>', page)
 
     def test_own_node_position_is_stored_from_node_beacon_only(self):
         beacon = {"src_type": "node", "type": "pos", "src": "OK9NODE-1", "lat": 49.1951,
