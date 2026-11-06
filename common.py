@@ -659,9 +659,13 @@ def _packet_position(packet: dict) -> tuple:
 
 
 def record_own_position(packet: dict, own_callsign: str = "") -> bool:
-    """Keep the position the own node beacons (src_type "node"), for the map and distances."""
+    """Keep the position the own node beacons, for the map, distances and the APRS beacon.
+
+    Taken from the node's own copy (src_type "node") and from its beacon
+    repeated back by a relay (src_type "lora", the path starts with the own callsign).
+    """
     source = str(packet.get("src", "")).split(",")[0].strip().upper()
-    if (packet.get("type") != "pos" or packet.get("src_type") != "node"
+    if (packet.get("type") != "pos" or packet.get("src_type") not in {"node", "lora"}
             or not source or source != str(own_callsign or "").strip().upper()):
         return False
     latitude, longitude = _packet_position(packet)

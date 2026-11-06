@@ -49,18 +49,26 @@ class AprsRxTests(unittest.TestCase):
         self.assertEqual((values["frequency_hz"], values["gain"], values["ppm"], values["device"]),
                          (144800000, None, 0, "0"))
         self.assertEqual(values["passcode"], aprs_rx.passcode("OK2ZAW"))
-        self.assertEqual((values["latitude"], values["longitude"]), (49.1951, 16.6068))
+        self.assertEqual((values["latitude"], values["longitude"], values["position_source"]),
+                         (49.1951, 16.6068, "node"))
         manual = aprs_rx.settings({**self.cfg, "aprs_latitude": "50,1", "aprs_longitude": "14.4",
                                    "aprs_gain": "38.6", "aprs_passcode": "12345"}, self.own)
-        self.assertEqual((manual["latitude"], manual["gain"], manual["passcode"]), (50.1, 38.6, 12345))
-        self.assertIsNone(aprs_rx.settings({**self.cfg, "aprs_beacon": False}, None)["latitude"])
+        self.assertEqual((manual["latitude"], manual["gain"], manual["passcode"], manual["position_source"]),
+                         (50.1, 38.6, 12345, "form"))
+        picked = aprs_rx.settings(self.cfg, {**self.own, "source": "manual"})
+        self.assertEqual(picked["position_source"], "manual")
+        # No position anywhere: the iGate still works, only the beacon is left out.
+        unknown = aprs_rx.settings(self.cfg, None)
+        self.assertIsNone(unknown["latitude"])
+        self.assertFalse(aprs_rx.beacon_active(unknown))
+        self.assertNotIn("PBEACON", aprs_rx.direwolf_config(unknown))
+        self.assertIn("IGLOGIN", aprs_rx.direwolf_config(unknown))
+        self.assertTrue(aprs_rx.beacon_active(values))
         for bad in ({"aprs_callsign": ""}, {"aprs_callsign": "OK2ZAW-16"}, {"aprs_frequency_mhz": "x"},
                     {"aprs_gain": "60"}, {"aprs_device": "0; rm"}, {"aprs_passcode": "abc"},
                     {"aprs_comment": 'a"b'}, {"aprs_server": "bad host"}):
             with self.assertRaises(radio_apps.RadioError, msg=bad):
                 aprs_rx.settings({**self.cfg, **bad}, self.own)
-        with self.assertRaises(radio_apps.RadioError):
-            aprs_rx.settings(self.cfg, None)  # beacon without any position
 
     def test_direwolf_config_and_command(self):
         values = aprs_rx.settings({**self.cfg, "aprs_gain": "40", "aprs_ppm": "-3"}, self.own)
@@ -202,7 +210,7 @@ class AprsRxTests(unittest.TestCase):
                          ("OK2ZAW-1", 2, False))
         with patch.object(webapp.common, "get_own_position", return_value=None):
             _, errors = webapp.save_aprs_settings({**form, "aprs_beacon": "on", "aprs_keep_days": "0"}, self.cfg)
-        self.assertEqual(len(errors), 2)  # keep days out of range, beacon without position
+        self.assertEqual(len(errors), 1)  # keep days out of range; a missing position is not an error
         # Disabled reception is saved without validating the rest.
         _, errors = webapp.save_aprs_settings({"aprs_callsign": ""}, self.cfg)
         self.assertEqual(errors, [])

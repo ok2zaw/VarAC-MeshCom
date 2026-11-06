@@ -954,6 +954,10 @@ def aprs():
                     flash("Nastavení uloženo." + (" Běžící příjem restartujte, aby změny použil."
                                                   if new_cfg["aprs_enabled"] else " APRS příjem je vypnutý."),
                           "success")
+                    if new_cfg["aprs_enabled"] and new_cfg["aprs_igate"] and new_cfg["aprs_beacon"] \
+                            and not common.get_own_position() and not new_cfg["aprs_latitude"]:
+                        flash("Maják iGate se neposílá: poloha není vyplněná a gateway nezná polohu uzlu. "
+                              "Vyplňte ji, nebo ji nastavte kliknutím do mapy na stránce RF stanice.", "error")
             return redirect(url_for("aprs", _anchor="aprs-settings"))
         if action in {"start", "stop", "restart"}:
             try:
@@ -1016,6 +1020,7 @@ def aprs():
         log="\n".join(log_text.splitlines()[-40:]), igate_state=aprs_rx.igate_state(log_text),
         monitor_alive=monitor_hb is not None and now - monitor_hb < 30,
         missing=aprs_rx.missing_programs(), values=values, settings_error=settings_error,
+        beacon_active=bool(values and aprs_rx.beacon_active(values)),
         computed_passcode=aprs_rx.passcode(cfg["aprs_callsign"]) if cfg.get("aprs_callsign") else None,
         direwolf_config=aprs_rx.DIREWOLF_CONFIG,
     )

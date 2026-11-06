@@ -81,20 +81,26 @@ def settings(cfg: dict, own_position: dict | None = None) -> dict:
         "comment": str(cfg.get("aprs_comment", "")).strip(),
         "latitude": None,
         "longitude": None,
+        "position_source": None,   # "form", "manual" (map pick) or "node" (node beacon)
     }
     if not _HOST.match(result["server"]):
         raise RadioError("APRS: server APRS-IS zadejte jako host nebo host:port.")
     if not _COMMENT.match(result["comment"]):
         raise RadioError("APRS: komentář majáku má nejvýš 60 znaků a nesmí obsahovat uvozovky ani \\.")
-    if result["igate"] and result["beacon"]:
-        if str(cfg.get("aprs_latitude", "")).strip() or str(cfg.get("aprs_longitude", "")).strip():
-            result["latitude"] = _number(cfg, "aprs_latitude", "APRS: zeměpisná šířka", -90, 90)
-            result["longitude"] = _number(cfg, "aprs_longitude", "APRS: zeměpisná délka", -180, 180)
-        elif own_position:
-            result["latitude"], result["longitude"] = own_position["latitude"], own_position["longitude"]
-        else:
-            raise RadioError("APRS: maják iGate potřebuje polohu – vyplňte ji, nebo nastavte polohu uzlu na mapě RF stanic.")
+    if str(cfg.get("aprs_latitude", "")).strip() or str(cfg.get("aprs_longitude", "")).strip():
+        result["latitude"] = _number(cfg, "aprs_latitude", "APRS: zeměpisná šířka", -90, 90)
+        result["longitude"] = _number(cfg, "aprs_longitude", "APRS: zeměpisná délka", -180, 180)
+        result["position_source"] = "form"
+    elif own_position:
+        # Same point the RF stations map uses: the position picked there, else the node beacon.
+        result["latitude"], result["longitude"] = own_position["latitude"], own_position["longitude"]
+        result["position_source"] = own_position.get("source", "node")
+    # Without any position the iGate still runs, it only does not beacon (see beacon_active).
     return result
+
+
+def beacon_active(values: dict) -> bool:
+    return bool(values["igate"] and values["beacon"] and values["latitude"] is not None)
 
 
 def direwolf_config(values: dict) -> str:
@@ -116,7 +122,7 @@ def direwolf_config(values: dict) -> str:
             f"IGSERVER {values['server']}",
             f"IGLOGIN {values['callsign']} {values['passcode']}",
         ]
-        if values["beacon"]:
+        if beacon_active(values):
             comment = values["comment"] or "RX iGate (RTL-SDR)"
             lines.append(
                 f"PBEACON sendto=IG delay=1 every=30 overlay=R symbol=\"igate\" "

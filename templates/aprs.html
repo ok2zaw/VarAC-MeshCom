@@ -53,7 +53,7 @@
       {% elif igate_state == 'disconnected' %}🔴 Odpojeno
       {% else %}🟡 Připojuje se{% endif %}
     </div>
-    <div class="card-sub">{{ cfg.aprs_callsign or '—' }} → {{ cfg.aprs_server }}{% if cfg.aprs_igate and cfg.aprs_beacon %} · maják každých 30 min{% endif %}</div>
+    <div class="card-sub">{{ cfg.aprs_callsign or '—' }} → {{ cfg.aprs_server }}{% if beacon_active %} · maják každých 30 min{% elif cfg.aprs_igate and cfg.aprs_beacon %} · maják se neposílá (chybí poloha){% endif %}</div>
   </div>
   <div class="card {{ 'ok' if monitor_alive else '' }}">
     <div class="card-label">Monitor paketů</div>
@@ -173,11 +173,18 @@
       <input type="text" name="aprs_passcode" value="{{ cfg.aprs_passcode }}" inputmode="numeric">
     </label>
     <label class="checkbox"><input type="checkbox" name="aprs_beacon" {{ 'checked' if cfg.aprs_beacon }}> Maják polohy iGate do APRS-IS (každých 30 min)</label>
-    <label>Zeměpisná šířka <span class="hint">(prázdné = poloha uzlu{% if own_position %} {{ '%.5f'|format(own_position.latitude) }}{% endif %})</span>
-      <input type="text" name="aprs_latitude" value="{{ cfg.aprs_latitude }}" inputmode="decimal">
+    <p class="hint">
+      Prázdná poloha = poloha uzlu ze stránky <a class="clear-filter" href="{{ url_for('stations') }}#station-map-heading">RF stanice</a>:
+      {% if own_position %}{{ '%.5f'|format(own_position.latitude) }}, {{ '%.5f'|format(own_position.longitude) }}
+        ({{ 'nastavená kliknutím do mapy' if own_position.source == 'manual' else 'z majáku MeshCom uzlu' }})
+        <button type="button" class="link-button" id="aprs-copy-position">vložit do polí</button>
+      {% else %}gateway ji zatím nezná – uzel neposlal maják s polohou; nastavte ji kliknutím do mapy RF stanic, nebo ji vyplňte zde.{% endif %}
+    </p>
+    <label>Zeměpisná šířka <span class="hint">(desetinné stupně, např. 49.19510)</span>
+      <input type="text" name="aprs_latitude" id="aprs-latitude" value="{{ cfg.aprs_latitude }}" inputmode="decimal" placeholder="{{ '%.5f'|format(own_position.latitude) if own_position else '' }}">
     </label>
-    <label>Zeměpisná délka <span class="hint">(prázdné = poloha uzlu{% if own_position %} {{ '%.5f'|format(own_position.longitude) }}{% endif %})</span>
-      <input type="text" name="aprs_longitude" value="{{ cfg.aprs_longitude }}" inputmode="decimal">
+    <label>Zeměpisná délka <span class="hint">(desetinné stupně, např. 16.60680)</span>
+      <input type="text" name="aprs_longitude" id="aprs-longitude" value="{{ cfg.aprs_longitude }}" inputmode="decimal" placeholder="{{ '%.5f'|format(own_position.longitude) if own_position else '' }}">
     </label>
     <label>Komentář majáku
       <input type="text" name="aprs_comment" value="{{ cfg.aprs_comment }}" maxlength="60">
@@ -194,6 +201,14 @@
 </details>
 
 <script>
+(() => {
+  const own = {{ own_position|tojson }};
+  const copy = document.getElementById("aprs-copy-position");
+  if (copy && own) copy.addEventListener("click", () => {
+    document.getElementById("aprs-latitude").value = own.latitude.toFixed(5);
+    document.getElementById("aprs-longitude").value = own.longitude.toFixed(5);
+  });
+})();
 (() => {
   const container = document.getElementById("aprs-map");
   if (typeof L === "undefined") {

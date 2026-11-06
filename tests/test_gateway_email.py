@@ -473,10 +473,13 @@ class GatewayEmailTests(unittest.TestCase):
              patch.object(common, "DB_PATH", os.path.join(tmpdir, "gateway.db")):
             common.init_db()
             self.assertIsNone(common.get_own_position())
-            self.assertFalse(common.record_own_position({**beacon, "src_type": "lora"}, "OK9NODE-1"))
+            self.assertFalse(common.record_own_position({**beacon, "src_type": "udp"}, "OK9NODE-1"))
             self.assertFalse(common.record_own_position({**beacon, "src": "OK1AAA-1"}, "OK9NODE-1"))
             self.assertFalse(common.record_own_position({**beacon, "lat": 0, "long": 0}, "OK9NODE-1"))
             self.assertTrue(common.record_own_position(beacon, "ok9node-1"))
+            # Own beacon repeated back by a relay carries the same position.
+            self.assertTrue(common.record_own_position(
+                {**beacon, "src_type": "lora", "src": "OK9NODE-1,OK2RPT-9"}, "OK9NODE-1"))
             self.assertTrue(common.record_own_position({**beacon, "lat": 50.0755, "long": 14.4378}, "OK9NODE-1"))
             position = common.get_own_position()
 
