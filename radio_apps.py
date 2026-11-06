@@ -203,11 +203,14 @@ def xara_config_text(cfg: dict) -> str:
     mode = XARA_MODES.get(str(cfg.get("xara_mode", "")))
     if mode is None:
         raise RadioError("XARA: neznámý režim.")
-    device = str(cfg.get("xara_audio_device", "")).strip()
-    if not device:
-        raise RadioError("XARA: vyberte zvukovou kartu.")
-    if not _DEVICE_NAME.match(device):
-        raise RadioError(f"XARA: neplatný název zvukového zařízení {device}.")
+    devices = {}
+    for direction, label in (("capture", "vstup zvuku (příjem)"), ("playback", "výstup zvuku (vysílání)")):
+        device = xara_audio_device(cfg, direction)
+        if not device:
+            raise RadioError(f"XARA: vyberte {label}.")
+        if not _DEVICE_NAME.match(device):
+            raise RadioError(f"XARA: neplatný název zvukového zařízení {device}.")
+        devices[direction] = device
     ptt = str(cfg.get("xara_ptt", "rigctld"))
     if ptt not in XARA_PTT:
         raise RadioError("XARA: neznámý způsob PTT.")
@@ -220,8 +223,8 @@ def xara_config_text(cfg: dict) -> str:
         f"call = {call}",
         f"{mode[0]} = {mode[1]}",
         "audio = alsa",
-        f"capture = {device}",
-        f"playback = {device}",
+        f"capture = {devices['capture']}",
+        f"playback = {devices['playback']}",
         "radio",
         f"drive-db = {max(-40.0, min(0.0, drive_db)):g}",
         f"ptt = rigctld:127.0.0.1:{rigctld_port(cfg)}" if ptt == "rigctld" else "ptt = vox",
@@ -266,20 +269,50 @@ def rigctld_command(cfg: dict) -> list[str]:
     return arguments + ["-T", "127.0.0.1", "-t", str(rigctld_port(cfg))]
 
 
-def sound_cards(cards_file: str = "/proc/asound/cards") -> list[dict]:
-    """ALSA cards as plughw names, USB cards first (the radio interface is usually one)."""
+def xara_audio_device(cfg: dict, direction: str) -> str:
+    """ALSA device for "capture" or "playback"; older configs had one shared xara_audio_device."""
+    return (str(cfg.get(f"xara_{direction}_device", "")).strip()
+            or str(cfg.get("xara_audio_device", "")).strip())
+
+
+def _read(path: str) -> str:
     try:
-        with open(cards_file, encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
     except OSError:
-        return []
-    cards = []
-    for match in re.finditer(r"^\s*\d+\s+\[(\S+)\s*\]:\s*(\S+)\s+-\s+(.*)$", text, re.MULTILINE):
-        card_id, driver, name = match.groups()
+        return ""
+
+
+def sound_devices(cards_file: str = "/proc/asound/cards",
+                  pcm_file: str = "/proc/asound/pcm") -> dict[str, list[dict]]:
+    """ALSA capture and playback devices as stable plughw names, USB cards first.
+
+    /proc/asound/pcm says which device of a card records and which plays
+    ("02-00: USB Audio : USB Audio : playback 1 : capture 1").
+    """
+    cards = {}
+    for match in re.finditer(r"^\s*(\d+)\s+\[(\S+)\s*\]:\s*(\S+)\s+-\s+(.*)$", _read(cards_file), re.MULTILINE):
+        number, card_id, driver, name = match.groups()
         usb = driver.startswith("USB")
-        cards.append({"value": f"plughw:CARD={card_id},DEV=0", "usb": usb,
-                      "label": f"{name.strip()} ({'USB' if usb else driver})"})
-    return sorted(cards, key=lambda card: not card["usb"])
+        cards[int(number)] = {"id": card_id, "usb": usb, "label": f"{name.strip()} ({'USB' if usb else driver})"}
+    devices = {"capture": [], "playback": []}
+    pcm = _read(pcm_file)
+    for match in re.finditer(r"^(\d+)-(\d+):(.*)$", pcm, re.MULTILINE):
+        card = cards.get(int(match.group(1)))
+        if card is None:
+            continue
+        device = int(match.group(2))
+        for direction in devices:
+            if re.search(rf":\s*{direction}\s+\d+", match.group(3)):
+                devices[direction].append({
+                    "value": f"plughw:CARD={card['id']},DEV={device}", "usb": card["usb"],
+                    "label": card["label"] + (f", zařízení {device}" if device else "")})
+    if not pcm:  # no pcm list: offer device 0 of every card both ways
+        for card in cards.values():
+            for direction in devices:
+                devices[direction].append({"value": f"plughw:CARD={card['id']},DEV=0",
+                                           "usb": card["usb"], "label": card["label"]})
+    return {direction: sorted(items, key=lambda item: not item["usb"]) for direction, items in devices.items()}
 
 
 def serial_devices(by_id_dir: str = "/dev/serial/by-id") -> list[str]:

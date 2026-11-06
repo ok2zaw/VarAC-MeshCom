@@ -1107,12 +1107,14 @@ sudo usermod -aG audio,dialout ok2zaw    # pak odhlásit/přihlásit nebo restar
 sudo apt install -y libhamlib-utils      # rigctld a rigctl pro CAT
 ```
 
-**Zvuk:** na záložce **VarAC** v části *XARA* vyberte USB zvukovou kartu
-rádia. Nabídka čte `/proc/asound/cards` (USB karty jsou nahoře) a ukládá
-stabilní název `plughw:CARD=<jméno>,DEV=0`, který se nemění s pořadím karet po
-startu. Stejnou kartu XARA použije pro příjem i vysílání. Ruční kontrola:
-`xara --list-devices --audio alsa`. Kartu nesmí současně držet VARA ani
-Mercury.
+**Zvuk:** na záložce **VarAC** v části *XARA* vyberte *Vstup zvuku* (příjem,
+z rádia do Pi) a *Výstup zvuku* (vysílání, z Pi do rádia). U běžného USB
+rozhraní rádia je to v obou polích stejná karta. Nabídky čtou
+`/proc/asound/cards` a `/proc/asound/pcm`, takže vstup nabízí jen zařízení,
+která umí záznam, a výstup jen ta, která umí přehrávání. USB karty jsou nahoře.
+Ukládá se stabilní název `plughw:CARD=<jméno>,DEV=<n>`, který se nemění
+s pořadím karet po startu. Ruční kontrola: `xara --list-devices --audio alsa`.
+Kartu nesmí současně držet VARA ani Mercury.
 
 **PTT přes CAT:** XARA klíčuje vysílač přes hamlib `rigctld`, který web také
 spouští (karta *rigctld (CAT)*). V části *CAT – rigctld* vyplňte:

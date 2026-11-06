@@ -79,7 +79,8 @@ DEFAULT_CONFIG = {
     "radio_xara_delay": 10,
     "xara_call": "",               # empty = gateway callsign without SSID
     "xara_mode": "hf2300",
-    "xara_audio_device": "",       # ALSA name, e.g. plughw:CARD=Device,DEV=0
+    "xara_capture_device": "",     # ALSA input from the radio, e.g. plughw:CARD=Device,DEV=0
+    "xara_playback_device": "",    # ALSA output to the radio
     "xara_ptt": "rigctld",
     "xara_drive_db": -5,
     "xara_port": 8300,

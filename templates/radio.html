@@ -120,18 +120,21 @@
         {% for value, mode in xara_modes.items() %}<option value="{{ value }}" {{ 'selected' if cfg.xara_mode == value }}>{{ mode[2] }}</option>{% endfor %}
       </select>
     </label>
-    <label>Zvuková karta <span class="hint">(záznam i přehrávání)</span>
-      <select name="xara_audio_device">
+    {% for direction, text, hint in [("capture", "Vstup zvuku", "příjem – z rádia do Pi"), ("playback", "Výstup zvuku", "vysílání – z Pi do rádia")] %}
+    {% set current = xara_devices[direction] %}
+    <label>{{ text }} <span class="hint">({{ hint }})</span>
+      <select name="xara_{{ direction }}_device">
         <option value="">– vyberte –</option>
         {% set ns = namespace(found=false) %}
-        {% for card in sound_cards %}
-        {% if card.value == cfg.xara_audio_device %}{% set ns.found = true %}{% endif %}
-        <option value="{{ card.value }}" {{ 'selected' if card.value == cfg.xara_audio_device }}>{{ card.label }} – {{ card.value }}</option>
+        {% for device in sound_devices[direction] %}
+        {% if device.value == current %}{% set ns.found = true %}{% endif %}
+        <option value="{{ device.value }}" {{ 'selected' if device.value == current }}>{{ device.label }} – {{ device.value }}</option>
         {% endfor %}
-        {% if cfg.xara_audio_device and not ns.found %}<option value="{{ cfg.xara_audio_device }}" selected>{{ cfg.xara_audio_device }} (teď nepřipojeno)</option>{% endif %}
+        {% if current and not ns.found %}<option value="{{ current }}" selected>{{ current }} (teď nepřipojeno)</option>{% endif %}
       </select>
     </label>
-    {% if not sound_cards %}<p class="hint">Žádná zvuková karta nenalezena (/proc/asound/cards). Připojte USB zvukovou kartu a obnovte stránku.</p>{% endif %}
+    {% endfor %}
+    {% if not sound_devices.capture and not sound_devices.playback %}<p class="hint">Žádná zvuková karta nenalezena (/proc/asound). Připojte USB zvukovou kartu a obnovte stránku.</p>{% endif %}
     <label>PTT
       <select name="xara_ptt">
         {% for value, text in xara_ptt.items() %}<option value="{{ value }}" {{ 'selected' if cfg.xara_ptt == value }}>{{ text }}</option>{% endfor %}

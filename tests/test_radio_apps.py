@@ -184,7 +184,8 @@ class RadioAppsTests(unittest.TestCase):
         self.assertIn('href="#mercury-gui"', page)
 
     def xara_cfg(self, **extra):
-        return {**self.cfg, "callsign": "OK2ZAW-10", "xara_audio_device": "plughw:CARD=Device,DEV=0", **extra}
+        return {**self.cfg, "callsign": "OK2ZAW-10", "xara_capture_device": "plughw:CARD=Device,DEV=0",
+                "xara_playback_device": "plughw:CARD=Device,DEV=0", **extra}
 
     def test_xara_config_follows_settings(self):
         text = radio_apps.xara_config_text(self.xara_cfg())
@@ -200,7 +201,14 @@ class RadioAppsTests(unittest.TestCase):
                      "ui-port = 8090", "ui-addr = 0.0.0.0"):
             self.assertIn(line + "\n", text)
         self.assertNotIn("ui-control", text)
-        for bad in ({"xara_audio_device": ""}, {"xara_audio_device": "hw:0\nui-control"},
+        text = radio_apps.xara_config_text(self.xara_cfg(xara_playback_device="plughw:CARD=Other,DEV=1"))
+        self.assertIn("capture = plughw:CARD=Device,DEV=0\nplayback = plughw:CARD=Other,DEV=1\n", text)
+        # Configs saved before the split still work: one device for both directions.
+        legacy = {**self.cfg, "callsign": "OK2ZAW-10", "xara_audio_device": "plughw:CARD=Old,DEV=0"}
+        self.assertIn("capture = plughw:CARD=Old,DEV=0\nplayback = plughw:CARD=Old,DEV=0\n",
+                      radio_apps.xara_config_text(legacy))
+        for bad in ({"xara_capture_device": ""}, {"xara_playback_device": ""},
+                    {"xara_capture_device": "hw:0\nui-control"},
                     {"xara_mode": "hf9999"}, {"xara_call": "X"}, {"xara_ptt": "dtr"}):
             with self.assertRaises(radio_apps.RadioError):
                 radio_apps.xara_config_text(self.xara_cfg(**bad))
@@ -243,16 +251,26 @@ class RadioAppsTests(unittest.TestCase):
         self.assertEqual(radio_apps.port_conflicts({**self.cfg, "radio_mercury_args": "-x alsa"}, {"xara", "mercury"}),
                          [("xara", "mercury", 8300)])
 
-    def test_sound_cards_put_usb_first(self):
+    def test_sound_devices_split_capture_and_playback(self):
         cards = os.path.join(self.tmp.name, "cards")
+        pcm = os.path.join(self.tmp.name, "pcm")
         with open(cards, "w", encoding="utf-8") as handle:
             handle.write(" 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0\n                      vc4-hdmi-0\n"
                          " 2 [Device         ]: USB-Audio - USB Audio Device\n"
                          "                      C-Media Electronics Inc. USB Audio Device at usb-xhci\n")
-        self.assertEqual(radio_apps.sound_cards(cards), [
-            {"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB Audio Device (USB)"},
-            {"value": "plughw:CARD=vc4hdmi0,DEV=0", "usb": False, "label": "vc4-hdmi-0 (vc4-hdmi)"}])
-        self.assertEqual(radio_apps.sound_cards(os.path.join(self.tmp.name, "missing")), [])
+        with open(pcm, "w", encoding="utf-8") as handle:
+            handle.write("00-00: MAI PCM i2s-hifi-0 : MAI PCM i2s-hifi-0 : playback 1\n"
+                         "02-00: USB Audio : USB Audio : playback 1 : capture 1\n")
+        devices = radio_apps.sound_devices(cards, pcm)
+        usb = {"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB Audio Device (USB)"}
+        self.assertEqual(devices["capture"], [usb])
+        self.assertEqual(devices["playback"], [
+            usb, {"value": "plughw:CARD=vc4hdmi0,DEV=0", "usb": False, "label": "vc4-hdmi-0 (vc4-hdmi)"}])
+        # Without /proc/asound/pcm every card is offered both ways.
+        fallback = radio_apps.sound_devices(cards, os.path.join(self.tmp.name, "missing"))
+        self.assertEqual(len(fallback["capture"]), 2)
+        self.assertEqual(radio_apps.sound_devices(os.path.join(self.tmp.name, "missing")),
+                         {"capture": [], "playback": []})
 
     def test_rig_models_parse_rigctl_list(self):
         output = (" Rig #  Mfg                    Model                   Version         Status      Macro\n"
@@ -267,7 +285,8 @@ class RadioAppsTests(unittest.TestCase):
     def test_web_saves_xara_and_rigctld_settings(self):
         form = {key: self.cfg[key] for key in webapp.RADIO_TEXT_FIELDS} | {
             "radio_mercury_gui_port": "10088", "xara_call": "ok1abc", "xara_mode": "hf500",
-            "xara_audio_device": "plughw:CARD=Device,DEV=0", "xara_ptt": "rigctld", "xara_drive_db": "-8",
+            "xara_capture_device": "plughw:CARD=Device,DEV=0", "xara_playback_device": "plughw:CARD=Device,DEV=0",
+            "xara_ptt": "rigctld", "xara_drive_db": "-8",
             "xara_port": "8400", "xara_ui_port": "8090", "rigctld_model": "3073",
             "rigctld_device": "/dev/ttyUSB0", "rigctld_speed": "19200", "rigctld_port": "4532"}
         new_cfg, errors = webapp.save_radio_settings(form, self.cfg)
@@ -283,8 +302,8 @@ class RadioAppsTests(unittest.TestCase):
 
     def test_radio_page_shows_xara_and_port_conflict(self):
         cfg = {"xara_ui_port": 8090, "radio_vara_autostart": True, "radio_xara_autostart": True}
-        with patch.object(webapp.radio_apps, "sound_cards",
-                          return_value=[{"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB"}]), \
+        usb = [{"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB"}]
+        with patch.object(webapp.radio_apps, "sound_devices", return_value={"capture": usb, "playback": usb}), \
              patch.object(webapp.radio_apps, "rig_models", return_value=((3073, "Icom IC-7300"),)):
             page, _ = self._radio_page(cfg, True)
         self.assertIn('href="http://192.168.1.20:8090/"', page)

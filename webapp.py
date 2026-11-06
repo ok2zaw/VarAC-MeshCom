@@ -545,7 +545,8 @@ def email_aliases():
 RADIO_TEXT_FIELDS = (
     "radio_display", "radio_wine_prefix", "radio_vara_path",
     "radio_mercury_command", "radio_mercury_args", "radio_varac_path",
-    "radio_xara_command", "xara_call", "xara_audio_device", "radio_rigctld_command", "rigctld_device",
+    "radio_xara_command", "xara_call", "xara_capture_device", "xara_playback_device",
+    "radio_rigctld_command", "rigctld_device",
 )
 
 
@@ -592,7 +593,8 @@ def _save_xara_settings(form_data, cfg, new_cfg, errors):
 
     if new_cfg["xara_call"] and not radio_apps._CALLSIGN.match(new_cfg["xara_call"]):
         errors.append("XARA: neplatná volací značka.")
-    for key in ("xara_audio_device", "rigctld_device"):
+    new_cfg.pop("xara_audio_device", None)  # replaced by separate capture/playback devices
+    for key in ("xara_capture_device", "xara_playback_device", "rigctld_device"):
         if new_cfg[key] and not radio_apps._DEVICE_NAME.match(new_cfg[key]):
             errors.append(f"{key}: neplatný název zařízení.")
     for key, name in (("radio_xara_command", "xara"), ("radio_rigctld_command", "rigctld")):
@@ -734,7 +736,8 @@ def radio():
         xara_call=radio_apps.xara_call(cfg), xara_port=radio_apps.xara_port(cfg),
         xara_ui_url=xara_ui_url, xara_ui_listening=xara_ui_listening,
         xara_config_path=radio_apps.XARA_CONFIG_PATH,
-        sound_cards=radio_apps.sound_cards(), serial_devices=radio_apps.serial_devices(),
+        sound_devices=radio_apps.sound_devices(), serial_devices=radio_apps.serial_devices(),
+        xara_devices={direction: radio_apps.xara_audio_device(cfg, direction) for direction in ("capture", "playback")},
         rig_models=rig_models, rig_model_names=dict(rig_models),
         rigctld_speeds=radio_apps.RIGCTLD_SPEEDS, rigctld_port=radio_apps.rigctld_port(cfg),
     )
