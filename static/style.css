@@ -246,6 +246,9 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 .map-pick-form button { margin-top: 6px; }
 .leaflet-tooltip.map-distance { padding: 0 4px; border: 0; border-radius: 3px; background: rgba(255, 255, 255, 0.85); box-shadow: none; color: #333; font-size: 10px; font-weight: 600; }
 .leaflet-tooltip.map-distance::before { display: none; }
+.leaflet-tooltip.map-call { padding: 0 4px; border: 0; border-radius: 3px; background: rgba(255, 255, 255, 0.85); box-shadow: none; color: #120d38; font-size: 11px; font-weight: 700; }
+.leaflet-tooltip.map-call::before { display: none; }
+.leaflet-tooltip.map-call-faded { opacity: 0.55 !important; font-weight: 600; }
 .presence { cursor: help; }
 .station-table { min-width: 1240px; }
 .station-table td { white-space: nowrap; }

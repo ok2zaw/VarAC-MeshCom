@@ -57,6 +57,7 @@
   {% if not map_stations %}· v tomto období žádná stanice neposlala polohu{% endif %}
 </p>
 <p class="map-legend map-controls">
+  <label class="map-toggle"><input type="checkbox" id="map-calls" checked> značky</label>
   <label class="map-toggle"><input type="checkbox" id="map-distances" checked> vzdálenosti</label>
   <label class="map-toggle"><input type="checkbox" id="map-routes"> cesty přes uzly</label>
   <label class="map-toggle"><input type="checkbox" id="map-pick"> nastavit polohu uzlu kliknutím</label>
@@ -280,17 +281,26 @@
       () => ({ color: "#1f5fbf", weight: 4, opacity: 0.85 }));
   };
 
+  // Callsign next to every marker; the "značky" checkbox shows or hides them all.
+  const callMarkers = [];
+  const withCall = (marker, call, faded = false) => {
+    marker.bindTooltip(esc(call), { permanent: true, direction: "right", offset: [8, 0],
+                                    className: "map-call" + (faded ? " map-call-faded" : "") });
+    callMarkers.push(marker);
+    return marker;
+  };
+
   if (own) {
-    L.circleMarker([own.latitude, own.longitude], { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 })
+    withCall(L.circleMarker([own.latitude, own.longitude], { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 }), ownCall)
       .addTo(map).bindPopup(
         `<strong>${esc(ownCall)}</strong><br>vlastní uzel – ` +
         `${own.source === "manual" ? "poloha nastavená v mapě" : "poloha z majáku uzlu"}<br>` +
         `${own.latitude.toFixed(5)}, ${own.longitude.toFixed(5)}`);
   }
   for (const r of relayPositions) {
-    L.circleMarker([r.latitude, r.longitude], {
+    withCall(L.circleMarker([r.latitude, r.longitude], {
       radius: 5, color: "#8a8a8a", weight: 2, opacity: 0.6, fillColor: "#ffffff", fillOpacity: 0.6, dashArray: "2 3",
-    }).addTo(map).bindPopup(
+    }), r.station, true).addTo(map).bindPopup(
       `<strong>${esc(r.station)}</strong><br>převaděč v cestách, v tomto období bez polohy<br>` +
       `poslední známá poloha: ${esc(r.last_seen_label)}`);
   }
@@ -300,11 +310,11 @@
     const fade = s.presence === "gone" ? 0.35 : 1;
     const signal = s.rssi != null ? `${s.rssi} dBm${s.snr != null ? ` / ${s.snr} dB` : ""}` : "—";
     const otherPaths = stationPaths.filter((p) => p.station === s.station && p.source_path !== s.source_path);
-    L.circleMarker(point, {
+    withCall(L.circleMarker(point, {
       radius: 7, color, weight: 2, opacity: fade,
       fillColor: color, fillOpacity: (s.direct ? 0.85 : 0.35) * fade,
       dashArray: s.direct ? null : "3 3",
-    }).addTo(map).bindPopup(
+    }), s.station, s.presence === "gone").addTo(map).bindPopup(
       `<strong>${esc(s.presence_icon)} ${esc(s.station)}</strong><br>` +
       `${esc(s.presence_label)} – ${esc(s.age_label)}<br>` +
       `${s.direct ? "slyšeno napřímo" : "přes " + esc(s.heard_from)}<br>` +
@@ -320,6 +330,17 @@
   }
   const remember = (key, value) => { try { localStorage.setItem(key, value); } catch (error) {} };
   const recall = (key) => { try { return localStorage.getItem(key); } catch (error) { return null; } };
+
+  const callToggle = document.getElementById("map-calls");
+  const showCalls = () => callMarkers.forEach((marker) => {
+    if (callToggle.checked) marker.openTooltip(); else marker.closeTooltip();
+  });
+  callToggle.checked = recall("meshcomMapCalls") !== "off";
+  showCalls();
+  callToggle.addEventListener("change", () => {
+    showCalls();
+    remember("meshcomMapCalls", callToggle.checked ? "on" : "off");
+  });
 
   distanceToggle.checked = recall("meshcomMapDistances") !== "off";
   lineGroups.forEach(showDistances);
