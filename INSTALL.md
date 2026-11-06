@@ -1721,9 +1721,9 @@ paketů.
    příjem nefunguje, zkuste 30–45 dB.
 5. **Korekce ppm:** levné dongly se liší až o desítky ppm, při 144,8 MHz je
    10 ppm = 1,4 kHz. Dongly s TCXO (RTL-SDR Blog V3/V4) mají ±1 ppm
-   a korekci nepotřebují. Odchylku změříte příkazem `rtl_test -p`
-   (běží několik minut, údaj `cumulative PPM` po ustálení) – příjem při tom
-   musí být zastavený.
+   a korekci nepotřebují. Odchylku nejlépe změří karta *Kalibrace RTL-SDR*
+   (kapitola 13.4); hrubší odhad dá `rtl_test -p` (běží několik minut, údaj
+   `cumulative PPM` po ustálení, příjem musí být zastavený).
 6. **Maják polohy** se posílá jen do APRS-IS. Prázdná poloha = poloha uzlu
    z mapy RF stanic (maják MeshCom uzlu nebo ruční poloha).
 7. Uložte a klikněte na **Spustit**.
@@ -1754,4 +1754,49 @@ pole *via*).
 | Pakety ve výpisu, ale tabulka prázdná | karta *Monitor paketů*: gateway musí běžet a KISS port v nastavení odpovídat; restart `meshcom-gateway` |
 | iGate 🔴 Odpojeno | síť, název serveru (`euro.aprs2.net`), passcode; ve výpisu hledejte `IGate server` |
 | Mapa bez stanic | stanice v období neposlaly polohu, nebo chybí knihovna `aprslib` (`pip install -r requirements.txt`) |
+| Kalibrace nenajde žádnou stanici GSM | jiné pásmo (`EGSM`), vyšší zisk, anténa pro 900 MHz; při odchylce přes ~30 ppm zadejte nejdřív přibližnou korekci do pole ppm a uložte |
+| Kalibrace hlásí, že `kal` vybírá jen podle indexu | v poli *RTL-SDR* je sériové číslo; pro kalibraci zadejte index (0) |
 
+### 13.4 Kalibrace RTL-SDR (kalibrate-rtl)
+
+Karta **Kalibrace RTL-SDR** na záložce APRS změří odchylku krystalu dongle
+programem [kalibrate-rtl](https://github.com/steve-m/kalibrate-rtl) (`kal`)
+podle základnových stanic GSM, které drží kmitočet s přesností 0,05 ppm.
+Instalace ze zdrojů:
+
+```bash
+sudo apt install -y git build-essential autoconf automake libtool pkg-config libfftw3-dev librtlsdr-dev
+git clone https://github.com/steve-m/kalibrate-rtl ~/kalibrate-rtl
+cd ~/kalibrate-rtl
+./bootstrap && CXXFLAGS='-W -Wall -O3' ./configure && make
+sudo make install            # /usr/local/bin/kal
+kal -h | head -3
+```
+
+Postup na kartě:
+
+1. Vyberte **pásmo**. V Česku vysílají GSM sítě v pásmu 900 MHz (`GSM900`,
+   širší `EGSM`) a 1800 MHz (`DCS`). Tuner R820T/R828D (RTL-SDR Blog V3/V4)
+   sahá jen do 1766 MHz, pro něj tedy DCS 1800 nepoužívejte.
+2. **Kanál** nechte prázdný: kalibrace nejdřív projde pásmo (několik minut),
+   vybere nejsilnější stanici a na ní změří odchylku. Nalezené stanice se
+   zobrazí v seznamu a odkazem *změřit* jde měření zopakovat na jiném kanálu.
+3. **Zisk** 40 dB obvykle stačí; když se nenajde žádná stanice, zkuste 45–49.
+4. Po dobu kalibrace web zastaví APRS příjem (dongle umí používat jen jeden
+   program) a po skončení ho zase spustí.
+5. Výsledek se ukáže na kartě, např. `+8.437 ppm`. Tlačítko **Použít 8 ppm**
+   ho vloží do pole *Korekce kmitočtu (ppm)*; nastavení uložte a příjem
+   restartujte.
+
+Kalibrace začíná s aktuální korekcí z nastavení (`kal -e`) a `kal` ji
+započítá do výsledku, takže hodnotu na kartě zadáváte přímo, nepřičítáte ji.
+Opakovaným měřením na 2–3 kanálech ověříte, že se výsledky shodují zhruba
+na 1 ppm. Ručně (APRS příjem nejdřív zastavte):
+
+```bash
+kal -s GSM900 -g 40          # seznam stanic: chan, kmitočet, odchylka, síla
+kal -c 37 -b GSM900 -g 40    # "average absolute error: 8.437 ppm"
+```
+
+Dongly s TCXO (RTL-SDR Blog V3/V4) mají odchylku do ±1 ppm a kalibraci
+nepotřebují.

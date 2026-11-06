@@ -49,6 +49,8 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 - Přijímat APRS přes RTL-SDR a jako RX iGate ho předávat do APRS-IS; záložka
 	APRS nastavuje příjem a ukazuje stav iGate, mapu a tabulku stanic,
 	poslední pakety a výpis Dire Wolf (kapitola 13 [INSTALL.md](INSTALL.md)).
+	Odchylku krystalu RTL-SDR změří kalibrace přes kalibrate-rtl podle stanic
+	GSM (volba pásma i kanálu); výsledek jde jedním kliknutím vložit do pole ppm.
 - Spouštět, zastavovat a sledovat VARA, XARA (nativní modem kompatibilní
 	s VARA, zvuková karta z nabídky, PTT přes CAT/rigctld), modem Mercury,
 	rigctld a VarAC ze záložky

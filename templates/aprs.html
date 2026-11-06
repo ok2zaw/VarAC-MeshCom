@@ -65,6 +65,75 @@
     <div class="card-value">{{ counts.hour }} / h</div>
     <div class="card-sub">{{ counts.day }} paketů a {{ counts.stations }} stanic za 24 h</div>
   </div>
+  {% set cal = calibration %}
+  {% set cal_busy = cal.state in cal_running and cal.active %}
+  <div class="card calibration-card {{ 'ok' if cal.state == 'done' else 'bad' if cal.state == 'error' else '' }}" id="rtl-calibration" data-running="{{ 'true' if cal_busy else 'false' }}">
+    <div class="card-label">Kalibrace RTL-SDR (kalibrate-rtl)</div>
+    {% if cal.state == 'done' and cal.ppm is not none %}
+    <div class="card-value">{{ '%+.3f'|format(cal.ppm) }} ppm</div>
+    <div class="card-sub">{{ cal_bands.get(cal.band, cal.band) }}, kanál {{ cal.channel }}{% if cal.finished_at %} · {{ cal.finished_label }}{% endif %} · nyní nastaveno {{ cfg.aprs_ppm }} ppm</div>
+    <div class="radio-actions">
+      <button type="button" id="cal-apply" data-ppm="{{ cal.ppm|round|int }}">Použít {{ cal.ppm|round|int }} ppm</button>
+    </div>
+    {% else %}
+    <div class="card-value" id="cal-state">{% if cal_busy %}⏳ {% elif cal.state == 'error' %}🔴 {% endif %}{{ cal.label }}</div>
+    <div class="card-sub" id="cal-detail">
+      {% if cal_busy %}{{ cal_bands.get(cal.band, cal.band) }}{% if cal.channel %}, kanál {{ cal.channel }}{% endif %} – trvá několik minut, APRS příjem je zatím zastavený
+      {% elif cal.state == 'error' %}{{ cal.error }}
+      {% else %}změří odchylku krystalu podle základnových stanic GSM{% endif %}
+    </div>
+    {% endif %}
+    {% if cal.channels %}
+    <details class="cal-channels">
+      <summary>Nalezené stanice GSM ({{ cal.channels|length }})</summary>
+      <table class="msg-table">
+        <thead><tr><th>Kanál</th><th>MHz</th><th>Odchylka</th><th>Síla</th><th></th></tr></thead>
+        <tbody>
+          {% for item in cal.channels %}
+          <tr>
+            <td>{{ item.channel }}{% if item.channel == cal.channel %} ✓{% endif %}</td>
+            <td>{{ item.freq_mhz }}</td>
+            <td>{{ '%+d'|format(item.offset_hz) }} Hz</td>
+            <td>{{ '%.0f'|format(item.power) }}</td>
+            <td>
+              <form method="post" action="{{ url_for('aprs') }}" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="calibrate">
+                <input type="hidden" name="rtl_cal_band" value="{{ cal.band }}">
+                <input type="hidden" name="rtl_cal_gain" value="{{ cfg.rtl_cal_gain }}">
+                <input type="hidden" name="rtl_cal_channel" value="{{ item.channel }}">
+                <button type="submit" class="link-button" {{ 'disabled' if cal_busy }}>změřit</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+    <form method="post" action="{{ url_for('aprs') }}" class="cal-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if cal_busy %}
+      <input type="hidden" name="action" value="calibrate_stop">
+      <button type="submit" class="secondary">Zastavit kalibraci</button>
+      {% else %}
+      <input type="hidden" name="action" value="calibrate">
+      <label>Pásmo
+        <select name="rtl_cal_band">
+          {% for value, text in cal_bands.items() %}<option value="{{ value }}" {{ 'selected' if value == cfg.rtl_cal_band }}>{{ text }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Kanál <span class="hint">(prázdné = nejsilnější)</span>
+        <input type="text" name="rtl_cal_channel" inputmode="numeric" placeholder="auto">
+      </label>
+      <label>Zisk dB
+        <input type="text" name="rtl_cal_gain" value="{{ cfg.rtl_cal_gain }}" inputmode="decimal">
+      </label>
+      <button type="submit" {{ 'disabled' if kal_missing }}>Kalibrovat</button>
+      {% if kal_missing %}<p class="hint">Program <code>kal</code> není nainstalovaný (INSTALL, kapitola 13.4).</p>{% endif %}
+      {% endif %}
+    </form>
+  </div>
 </div>
 
 <form method="get" class="station-filter">
@@ -148,7 +217,7 @@
       <input type="text" name="aprs_gain" value="{{ cfg.aprs_gain }}" inputmode="decimal" placeholder="automatický">
     </label>
     <label>Korekce kmitočtu (ppm) <span class="hint">(odchylka krystalu dongle, viz INSTALL 13)</span>
-      <input type="number" name="aprs_ppm" value="{{ cfg.aprs_ppm }}" min="-200" max="200">
+      <input type="number" name="aprs_ppm" id="aprs-ppm" value="{{ cfg.aprs_ppm }}" min="-200" max="200">
     </label>
     <label>RTL-SDR <span class="hint">(index 0, 1… nebo sériové číslo dongle)</span>
       <input type="text" name="aprs_device" value="{{ cfg.aprs_device }}">
@@ -189,6 +258,7 @@
     <label>Komentář majáku
       <input type="text" name="aprs_comment" value="{{ cfg.aprs_comment }}" maxlength="60">
     </label>
+    <p class="hint">Korekci ppm změříte kartou <a class="clear-filter" href="#rtl-calibration">Kalibrace RTL-SDR</a> nahoře; „Použít“ ji vloží do pole, pak uložte a restartujte příjem.</p>
     <p class="hint">Dire Wolf se konfiguruje souborem {{ direwolf_config }}, který web přepíše při každém uložení. Změny se projeví po restartu příjmu.</p>
   </fieldset>
   <button type="submit">Uložit</button>
@@ -201,6 +271,33 @@
 </details>
 
 <script>
+(() => {
+  // Calibration: copy the result into the ppm field, and follow a running calibration.
+  const apply = document.getElementById("cal-apply");
+  if (apply) apply.addEventListener("click", () => {
+    const field = document.getElementById("aprs-ppm");
+    field.value = apply.dataset.ppm;
+    field.closest("label").classList.add("field-changed");
+    field.scrollIntoView({ behavior: "smooth", block: "center" });
+    field.focus();
+  });
+  const card = document.getElementById("rtl-calibration");
+  if (card && card.dataset.running === "true") {
+    const poll = async () => {
+      try {
+        const response = await fetch({{ url_for('aprs_calibration')|tojson }}, { cache: "no-store" });
+        const state = await response.json();
+        if (state.state === "done" || state.state === "error" || !state.active) {
+          location.reload();  // the page renders the result
+          return;
+        }
+        document.getElementById("cal-state").textContent = "⏳ " + state.label;
+      } catch (error) { /* keep polling */ }
+      setTimeout(poll, 3000);
+    };
+    setTimeout(poll, 3000);
+  }
+})();
 (() => {
   const own = {{ own_position|tojson }};
   const copy = document.getElementById("aprs-copy-position");

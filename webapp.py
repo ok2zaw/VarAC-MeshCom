@@ -26,6 +26,7 @@ import ipaddress
 import os
 import re
 import secrets
+import shutil
 import socket
 import time
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
@@ -40,6 +41,7 @@ import common
 import gateway
 import ports
 import radio_apps
+import rtl_calibrate
 import system_time
 import update_manager
 
@@ -959,6 +961,25 @@ def aprs():
                         flash("Maják iGate se neposílá: poloha není vyplněná a gateway nezná polohu uzlu. "
                               "Vyplňte ji, nebo ji nastavte kliknutím do mapy na stránce RF stanice.", "error")
             return redirect(url_for("aprs", _anchor="aprs-settings"))
+        if action == "calibrate":
+            band = request.form.get("rtl_cal_band", "")
+            channel = request.form.get("rtl_cal_channel", "").strip()
+            gain = request.form.get("rtl_cal_gain", "").strip()
+            try:
+                rtl_calibrate.validate(band, channel, gain)
+                new_cfg = {**cfg, "rtl_cal_band": band, "rtl_cal_gain": gain}
+                common.save_config(new_cfg)
+                rtl_calibrate.start(new_cfg, band, channel)
+            except radio_apps.RadioError as exc:
+                flash(str(exc), "error")
+            else:
+                flash("Kalibrace běží" + (f" na kanálu {channel}" if channel else "")
+                      + "; APRS příjem je na tu dobu zastavený.", "success")
+            return redirect(url_for("aprs", _anchor="rtl-calibration"))
+        if action == "calibrate_stop":
+            rtl_calibrate.stop()
+            flash("Kalibrace zastavena.", "success")
+            return redirect(url_for("aprs", _anchor="rtl-calibration"))
         if action in {"start", "stop", "restart"}:
             try:
                 if action == "start":
@@ -1012,6 +1033,9 @@ def aprs():
     except radio_apps.RadioError as exc:
         values, settings_error = None, str(exc)
     counts = common.get_aprs_counts(now)
+    calibration = rtl_calibrate.status()
+    if calibration.get("finished_at"):
+        calibration["finished_label"] = format_ts(calibration["finished_at"], cfg)
     return render_template(
         "aprs.html", cfg=cfg, hours=hours, periods=APRS_PERIODS, selected=selected,
         stations=stations, map_stations=map_stations, packets=packets, own_position=own_position,
@@ -1023,7 +1047,17 @@ def aprs():
         beacon_active=bool(values and aprs_rx.beacon_active(values)),
         computed_passcode=aprs_rx.passcode(cfg["aprs_callsign"]) if cfg.get("aprs_callsign") else None,
         direwolf_config=aprs_rx.DIREWOLF_CONFIG,
+        calibration=calibration, cal_bands=rtl_calibrate.BANDS,
+        cal_running=rtl_calibrate.RUNNING, kal_missing=shutil.which("kal") is None,
     )
+
+
+@app.route("/aprs/calibration")
+@requires_auth
+def aprs_calibration():
+    """Calibration progress for the polling on the APRS tab."""
+    state = rtl_calibrate.status()
+    return {key: state.get(key) for key in ("state", "label", "active", "band", "channel", "ppm", "error")}
 
 
 BPQ_LOG_LINES = (50, 200, 500)

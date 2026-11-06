@@ -111,6 +111,8 @@ DEFAULT_CONFIG = {
     "aprs_longitude": "",
     "aprs_comment": "RX iGate (RTL-SDR)",
     "aprs_keep_days": 30,
+    "rtl_cal_band": "GSM900",      # kalibrate-rtl: GSM band with base stations nearby
+    "rtl_cal_gain": "40",          # dB for kal; empty = kal default
     "radio_varac_autostart": False,
     "radio_varac_delay": 40,
     # LoRa TNC defaults follow the OK2ZAW dual-TNC board (IRQ 5 / 19).

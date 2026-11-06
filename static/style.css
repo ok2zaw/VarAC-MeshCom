@@ -170,7 +170,7 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
 .update-result .flash { margin: 0 0 1rem; }
 
 .radio-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-.radio-actions button {
+.radio-actions button, .cal-form button {
   min-height: 28px;
   padding: 0.3rem 0.7rem;
   border: 1px solid var(--accent);
@@ -181,8 +181,9 @@ h2 { margin: 1.8rem 0 0.8rem; font-size: 16px; }
   font-size: 12px;
   font-weight: 600;
 }
-.radio-actions button:hover { background: var(--accent-hover); }
-.radio-actions button.secondary { background: transparent; color: var(--accent-text); }
+.radio-actions button:hover, .cal-form button:hover { background: var(--accent-hover); }
+.cal-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.radio-actions button.secondary, .cal-form button.secondary { background: transparent; color: var(--accent-text); }
 .radio-actions button.secondary:hover { background: var(--fill-muted); }
 .radio-actions .button-link {
   display: inline-flex;
@@ -482,3 +483,12 @@ html[data-theme="dark"] .station-map .leaflet-tile-pane { filter: invert(1) hue-
 .service-log { height: 420px; margin: 0 0 6px; padding: 8px 10px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text-2); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .config-form label.wide { grid-column: 1 / -1; }
 .config-form textarea { display: block; width: 100%; margin-top: 4px; padding: 0.4rem 0.55rem; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font: 12px/1.4 ui-monospace, Menlo, monospace; resize: vertical; }
+.calibration-card { grid-column: span 2; }
+.cal-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; margin-top: 10px; }
+.cal-form label { display: grid; gap: 3px; color: var(--text-2); font-size: 11px; }
+.cal-form input, .cal-form select { min-height: 28px; padding: 0 6px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--fill); color: var(--text); font-size: 12px; }
+.cal-form input { width: 70px; }
+.cal-channels { margin-top: 8px; font-size: 12px; }
+.cal-channels summary { cursor: pointer; color: var(--text-2); }
+.field-changed input { outline: 2px solid var(--accent); }
+@media (max-width: 640px) { .calibration-card { grid-column: auto; } }
