@@ -297,6 +297,8 @@ class RadioAppsTests(unittest.TestCase):
         _, errors = webapp.save_radio_settings({**form, "xara_ui_port": "8401", "xara_mode": "x",
                                                 "rigctld_speed": "1234", "xara_drive_db": "3"}, self.cfg)
         self.assertEqual(len(errors), 4)
+        _, errors = webapp.save_radio_settings({**form, "rigctld_port": "8401"}, self.cfg)
+        self.assertEqual(errors, ["rigctld: port 8401 používá modem (VARA, XARA nebo Mercury)."])
         new_cfg, errors = webapp.save_radio_settings({**form, "xara_ui_port": "", "rigctld_model": ""}, self.cfg)
         self.assertEqual((errors, new_cfg["xara_ui_port"], new_cfg["rigctld_model"]), ([], 0, ""))
 

@@ -93,6 +93,24 @@ DEFAULT_CONFIG = {
     "rigctld_speed": 0,            # 0 = hamlib default for the model
     "rigctld_port": 4532,
     "radio_varac_path": os.path.join(WINE_PREFIX, "drive_c", "VarAC", "VarAC.exe"),
+    # APRS RX iGate on an RTL-SDR (aprs_rx.py): rtl_fm | direwolf, packets to APRS-IS.
+    "aprs_enabled": False,
+    "aprs_autostart": True,        # start at boot (systemd user unit, needs linger)
+    "aprs_delay": 0,
+    "aprs_callsign": "",           # e.g. OK2ZAW-1; not the SSID of the MeshCom node
+    "aprs_passcode": "",           # empty = computed from the callsign
+    "aprs_frequency_mhz": "144.800",
+    "aprs_gain": "",               # dB 0-50, empty = automatic gain
+    "aprs_ppm": 0,
+    "aprs_device": "0",            # RTL-SDR index or serial number
+    "aprs_kiss_port": 8001,
+    "aprs_igate": True,
+    "aprs_server": "euro.aprs2.net",
+    "aprs_beacon": True,
+    "aprs_latitude": "",           # empty = position of the own node
+    "aprs_longitude": "",
+    "aprs_comment": "RX iGate (RTL-SDR)",
+    "aprs_keep_days": 30,
     "radio_varac_autostart": False,
     "radio_varac_delay": 40,
     # LoRa TNC defaults follow the OK2ZAW dual-TNC board (IRQ 5 / 19).
@@ -438,6 +456,28 @@ def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_heard_rf_messages_time "
             "ON heard_rf_messages(observed_at DESC)"
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS aprs_packets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                received_at REAL NOT NULL,
+                source TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                path TEXT NOT NULL,
+                info TEXT NOT NULL,
+                heard_from TEXT,
+                packet_format TEXT,
+                latitude REAL,
+                longitude REAL,
+                symbol_table TEXT,
+                symbol TEXT,
+                comment TEXT
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_aprs_packets_time ON aprs_packets(received_at DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_aprs_packets_source_time "
+                     "ON aprs_packets(source, received_at DESC)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_heard_rf_messages_channel_time "
             "ON heard_rf_messages(channel, observed_at DESC)"
@@ -1365,6 +1405,102 @@ def count_station_history(since: float, until: float, station: str = "", path_ch
     conn = _station_db(path_check)
     try:
         return conn.execute(query, params).fetchone()[0]
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------------------------
+# APRS packets heard by the RTL-SDR iGate (aprs_rx.py, monitor in gateway.py)
+# ------------------------------------------------------------------
+
+APRS_COLUMNS = ("received_at", "source", "destination", "path", "info", "heard_from", "packet_format",
+                "latitude", "longitude", "symbol_table", "symbol", "comment")
+
+
+def record_aprs_packet(packet: dict) -> None:
+    row = {column: packet.get(column) for column in APRS_COLUMNS}
+    row["received_at"] = row["received_at"] or time.time()
+    conn = get_db()
+    try:
+        conn.execute(f"INSERT INTO aprs_packets ({', '.join(APRS_COLUMNS)}) "
+                     f"VALUES ({', '.join(':' + column for column in APRS_COLUMNS)})", row)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def prune_aprs_packets(keep_days: float) -> int:
+    conn = get_db()
+    try:
+        deleted = conn.execute("DELETE FROM aprs_packets WHERE received_at < ?",
+                               (time.time() - keep_days * 86400,)).rowcount
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
+def get_aprs_packets(since: float, station: str = "", limit: int = 200) -> list[dict]:
+    query = "SELECT * FROM aprs_packets WHERE received_at >= ?"
+    params = [since]
+    if station:
+        query += " AND source = ?"
+        params.append(station.strip().upper())
+    query += " ORDER BY received_at DESC, id DESC LIMIT ?"
+    params.append(max(1, min(limit, 1000)))
+    conn = get_db()
+    try:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_aprs_stations(since: float, limit: int = 500) -> list[dict]:
+    """Per station: count, first/last heard, newest packet and newest position in the period."""
+    query = """
+        WITH filtered AS (SELECT * FROM aprs_packets WHERE received_at >= ?),
+        stats AS (
+            SELECT source, COUNT(*) AS packets, MIN(received_at) AS first_seen, MAX(received_at) AS last_seen,
+                   SUM(heard_from = source) AS direct_packets
+            FROM filtered GROUP BY source
+        ),
+        latest AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (SELECT source, MAX(id) AS id FROM filtered GROUP BY source) AS newest ON newest.id = item.id
+        ),
+        latest_position AS (
+            SELECT item.* FROM filtered AS item
+            JOIN (SELECT source, MAX(id) AS id FROM filtered WHERE latitude IS NOT NULL GROUP BY source)
+              AS newest ON newest.id = item.id
+        )
+        SELECT stats.*, latest.path, latest.heard_from, latest.info, latest.comment,
+               latest_position.latitude, latest_position.longitude,
+               COALESCE(latest_position.symbol_table, latest.symbol_table) AS symbol_table,
+               COALESCE(latest_position.symbol, latest.symbol) AS symbol
+        FROM stats
+        JOIN latest ON latest.source = stats.source
+        LEFT JOIN latest_position ON latest_position.source = stats.source
+        ORDER BY stats.last_seen DESC LIMIT ?
+    """
+    conn = get_db()
+    try:
+        return [dict(row) for row in conn.execute(query, (since, max(1, min(limit, 1000)))).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_aprs_counts(now: float = None) -> dict:
+    now = time.time() if now is None else now
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT SUM(received_at >= ?) AS hour, COUNT(*) AS day, COUNT(DISTINCT source) AS stations "
+            "FROM aprs_packets WHERE received_at >= ?",
+            (now - 3600, now - 86400),
+        ).fetchone()
+        last = conn.execute("SELECT MAX(received_at) FROM aprs_packets").fetchone()[0]
+        return {"hour": row["hour"] or 0, "day": row["day"] or 0,
+                "stations": row["stations"] or 0, "last": last}
     finally:
         conn.close()
 

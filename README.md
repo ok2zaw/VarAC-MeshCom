@@ -46,6 +46,9 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	(INSTALL, kapitola 9.5).
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
+- Přijímat APRS přes RTL-SDR a jako RX iGate ho předávat do APRS-IS; záložka
+	APRS nastavuje příjem a ukazuje stav iGate, mapu a tabulku stanic,
+	poslední pakety a výpis Dire Wolf (kapitola 13 [INSTALL.md](INSTALL.md)).
 - Spouštět, zastavovat a sledovat VARA, XARA (nativní modem kompatibilní
 	s VARA, zvuková karta z nabídky, PTT přes CAT/rigctld), modem Mercury,
 	rigctld a VarAC ze záložky
@@ -65,6 +68,11 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	(uzel, Telnet/web, KISS port pro každý TNC, BBS) a ukáže výpis služeb
 	a živý provoz RX/TX. BBS lze napojit na místní Postfix jako e-mailovou
 	bránu (kapitola 12 [INSTALL.md](INSTALL.md)).
+- Hlídat TCP porty napříč záložkami VarAC, BPQ a APRS: uložení se odmítne,
+	pokud by nový port obsadil port jiné služby (web gateway 8899, LinBPQ,
+	TNC, rigctld, modemy, Dire Wolf KISS 8001 a AGW 8000). VARA, XARA
+	a Mercury smí sdílet 8300, protože běží vždy jen jeden z nich. Přehled
+	portů je v kapitole 9.4 [INSTALL.md](INSTALL.md).
 - Ukládat historii, chyby a heartbeat do SQLite.
 
 ## Formát zpráv
@@ -212,7 +220,8 @@ předmět zkrátit, případně doplnit `GROUP: <číslo>`.
 	portů včetně souběhu s Webminem a nastavení času a NTP z webu,
 - kapitola 11: VARA, XARA (nativní náhrada VARA, PTT přes CAT/rigctld),
 	Mercury (včetně webového GUI) a VarAC na Raspberry Pi,
-- kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix.
+- kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix,
+- kapitola 13: APRS RX iGate s RTL-SDR (rtl_fm + Dire Wolf) a jeho monitoring.
 
 Upravená kopie LoRa TNC je ve složce [`lora_tnc/`](lora_tnc/README.md) i se
 seznamem změn oproti originálu.

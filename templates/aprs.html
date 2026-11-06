@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}APRS – MeshCom Gateway{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+{% endblock %}
+{% block content %}
+{% set state_labels = {"active": "Běží", "activating": "Spouští se", "deactivating": "Zastavuje se", "inactive": "Neběží", "failed": "Chyba", "unknown": "Neznámý"} %}
+<h1>APRS příjem (RTL-SDR)</h1>
+<p class="monitor-note">RTL-SDR přijímá APRS na {{ cfg.aprs_frequency_mhz }} MHz, Dire Wolf pakety dekóduje{% if cfg.aprs_igate %} a jako RX iGate je posílá do APRS-IS ({{ cfg.aprs_server }}){% endif %}. Do rádiového éteru nic nevysílá. <a class="clear-filter" href="{{ url_for('aprs', hours=hours) }}">Obnovit</a></p>
+
+{% if missing %}
+<div class="flash error" role="alert">Chybí program {{ missing|join(', ') }} – nainstalujte <code>sudo apt install rtl-sdr direwolf</code> (INSTALL, kapitola 13).</div>
+{% endif %}
+{% if cfg.aprs_enabled and settings_error %}
+<div class="flash error" role="alert">{{ settings_error }}</div>
+{% endif %}
+
+{% set state = service.state %}
+{% set crashing = state == 'activating' and service.sub_state == 'auto-restart' %}
+<div class="cards">
+  <div class="card {{ 'ok' if state == 'active' else 'bad' if state == 'failed' or crashing else '' }}">
+    <div class="card-label">Příjem rtl_fm + Dire Wolf</div>
+    <div class="card-value">{% if state == 'active' %}🟢{% elif state == 'failed' or crashing %}🔴{% else %}⚪{% endif %} {{ 'Padá, restartuje se' if crashing else state_labels.get(state, state) }}</div>
+    <div class="card-sub">
+      {% if not cfg.aprs_enabled %}APRS příjem je vypnutý – zapněte ho v <a class="clear-filter" href="#aprs-settings">nastavení</a>
+      {% elif crashing %}program po startu skončil chybou; důvod je ve <a class="clear-filter" href="#aprs-log">výpisu</a>
+      {% elif service.error %}{{ service.error }}
+      {% elif service.since %}od {{ service.since }}
+      {% elif not unit_exists %}služba zatím není vytvořená – uložte nastavení
+      {% else %}start po spuštění Pi {{ 'zapnutý' if service.enabled == 'enabled' else 'vypnutý' }}{% endif %}
+    </div>
+    {% if cfg.aprs_enabled %}
+    <div class="radio-actions">
+      {% for action, text in [("start", "Spustit"), ("restart", "Restart"), ("stop", "Zastavit")] %}
+      <form method="post" action="{{ url_for('aprs') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="{{ action }}">
+        <button type="submit"{% if action == 'stop' %} class="secondary"{% endif %}>{{ text }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="card {{ 'ok' if igate_state == 'connected' and state == 'active' else 'bad' if igate_state == 'disconnected' and state == 'active' else '' }}">
+    <div class="card-label">APRS-IS iGate</div>
+    <div class="card-value">
+      {% if not cfg.aprs_igate %}⚪ Vypnuto
+      {% elif state != 'active' %}⚪ Příjem neběží
+      {% elif igate_state == 'connected' %}🟢 Připojeno
+      {% elif igate_state == 'disconnected' %}🔴 Odpojeno
+      {% else %}🟡 Připojuje se{% endif %}
+    </div>
+    <div class="card-sub">{{ cfg.aprs_callsign or '—' }} → {{ cfg.aprs_server }}{% if cfg.aprs_igate and cfg.aprs_beacon %} · maják každých 30 min{% endif %}</div>
+  </div>
+  <div class="card {{ 'ok' if monitor_alive else '' }}">
+    <div class="card-label">Monitor paketů</div>
+    <div class="card-value">{{ '🟢 Připojen' if monitor_alive else '⚪ Nepřipojen' }}</div>
+    <div class="card-sub">KISS 127.0.0.1:{{ cfg.aprs_kiss_port }} · naposledy {{ last_label or 'nic' }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Provoz</div>
+    <div class="card-value">{{ counts.hour }} / h</div>
+    <div class="card-sub">{{ counts.day }} paketů a {{ counts.stations }} stanic za 24 h</div>
+  </div>
+</div>
+
+<form method="get" class="station-filter">
+  <label>Období
+    <select name="hours">
+      {% for value, text in periods.items() %}<option value="{{ value }}" {{ 'selected' if value == hours }}>{{ text }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if selected %}<input type="hidden" name="station" value="{{ selected }}">{% endif %}
+  <button type="submit">Zobrazit</button>
+</form>
+
+<h2 id="aprs-map-heading">Mapa</h2>
+<div id="aprs-map" class="station-map" aria-labelledby="aprs-map-heading"></div>
+<p class="map-legend">
+  <span class="legend-dot" style="background:#2e9d4f"></span>slyšeno napřímo
+  <span class="legend-dot legend-relay"></span>přes digipeater
+  <span class="legend-dot legend-own"></span>vlastní poloha
+  · čára = přímý příjem · ⚪ = déle než 2 h (průhledná)
+  {% if not map_stations %}· v tomto období žádná stanice neposlala polohu{% endif %}
+</p>
+
+<h2>Stanice za {{ periods[hours] }}</h2>
+<div class="table-wrap">
+  <table class="msg-table station-table">
+    <thead>
+      <tr><th>Stanice</th><th>Symbol</th><th>Přijato přes</th><th>Pakety</th><th>Naposledy</th><th>Vzdálenost</th><th>Komentář</th></tr>
+    </thead>
+    <tbody>
+      {% for row in stations %}
+      <tr>
+        <td><span class="presence" title="{{ row.presence_label }} – {{ row.age_label }}">{{ row.presence_icon }}</span> <a href="{{ url_for('aprs', hours=hours, station=row.source) }}#aprs-packets">{{ row.source }}</a></td>
+        <td>{% if row.symbol %}<code>{{ row.symbol_table }}{{ row.symbol }}</code>{% else %}—{% endif %}</td>
+        <td title="{{ row.path }}">{% if row.direct %}napřímo{% else %}{{ row.heard_from or 'digipeater' }}{% endif %}</td>
+        <td>{{ row.packets }}</td>
+        <td>{{ row.last_seen_label }}</td>
+        <td>{% if row.distance_km is not none %}{{ row.distance_km }} km{% else %}—{% endif %}</td>
+        <td>{{ row.comment or '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">V tomto období nebyl přijat žádný APRS paket.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2 id="aprs-packets">Pakety{% if selected %}: {{ selected }} <a class="clear-filter" href="{{ url_for('aprs', hours=hours) }}#aprs-packets">zobrazit všechny</a>{% endif %}</h2>
+<p class="card-sub">Nejvýš 200 nejnovějších paketů v období, v textovém tvaru APRS-IS; * označuje digipeater, který paket opakoval.</p>
+<div class="table-wrap">
+  <table class="msg-table rf-message-table">
+    <thead><tr><th>Čas</th><th>Stanice</th><th>Typ</th><th>Paket</th></tr></thead>
+    <tbody>
+      {% for row in packets %}
+      <tr>
+        <td>{{ row.received_label }}</td>
+        <td>{{ row.source }}</td>
+        <td>{{ row.packet_format or '—' }}</td>
+        <td><code>{{ row.tnc2 }}</code></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">Žádné pakety.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<form method="post" action="{{ url_for('aprs') }}" class="config-form" id="aprs-settings">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="action" value="save">
+  <fieldset>
+    <legend>Příjem</legend>
+    <label class="checkbox"><input type="checkbox" name="aprs_enabled" {{ 'checked' if cfg.aprs_enabled }}> APRS příjem zapnutý</label>
+    <label class="checkbox"><input type="checkbox" name="aprs_autostart" {{ 'checked' if cfg.aprs_autostart }}> Spouštět po startu Pi</label>
+    <label>Zpoždění po startu (s)
+      <input type="number" name="aprs_delay" value="{{ cfg.aprs_delay }}" min="0" max="600">
+    </label>
+    <label>Kmitočet (MHz) <span class="hint">(Evropa 144.800)</span>
+      <input type="text" name="aprs_frequency_mhz" value="{{ cfg.aprs_frequency_mhz }}" inputmode="decimal">
+    </label>
+    <label>Zisk (dB) <span class="hint">(0–50, prázdné = automatický)</span>
+      <input type="text" name="aprs_gain" value="{{ cfg.aprs_gain }}" inputmode="decimal" placeholder="automatický">
+    </label>
+    <label>Korekce kmitočtu (ppm) <span class="hint">(odchylka krystalu dongle, viz INSTALL 13)</span>
+      <input type="number" name="aprs_ppm" value="{{ cfg.aprs_ppm }}" min="-200" max="200">
+    </label>
+    <label>RTL-SDR <span class="hint">(index 0, 1… nebo sériové číslo dongle)</span>
+      <input type="text" name="aprs_device" value="{{ cfg.aprs_device }}">
+    </label>
+    <label>KISS port Dire Wolf <span class="hint">(čte ho monitor paketů)</span>
+      <input type="number" name="aprs_kiss_port" value="{{ cfg.aprs_kiss_port }}" min="1024" max="65535">
+    </label>
+    <label>Uchovávat pakety (dní)
+      <input type="number" name="aprs_keep_days" value="{{ cfg.aprs_keep_days }}" min="1" max="365">
+    </label>
+  </fieldset>
+  <fieldset>
+    <legend>iGate do APRS-IS</legend>
+    <label>Volací značka iGate <span class="hint">(se SSID, jiným než MeshCom uzel {{ cfg.callsign }})</span>
+      <input type="text" name="aprs_callsign" value="{{ cfg.aprs_callsign }}" placeholder="např. {{ cfg.callsign.split('-')[0] }}-1">
+    </label>
+    <label class="checkbox"><input type="checkbox" name="aprs_igate" {{ 'checked' if cfg.aprs_igate }}> Posílat přijaté pakety do APRS-IS</label>
+    <label>Server APRS-IS
+      <input type="text" name="aprs_server" value="{{ cfg.aprs_server }}">
+    </label>
+    <label>Passcode <span class="hint">(prázdné = vypočítat{% if computed_passcode is not none %}: {{ computed_passcode }}{% endif %})</span>
+      <input type="text" name="aprs_passcode" value="{{ cfg.aprs_passcode }}" inputmode="numeric">
+    </label>
+    <label class="checkbox"><input type="checkbox" name="aprs_beacon" {{ 'checked' if cfg.aprs_beacon }}> Maják polohy iGate do APRS-IS (každých 30 min)</label>
+    <label>Zeměpisná šířka <span class="hint">(prázdné = poloha uzlu{% if own_position %} {{ '%.5f'|format(own_position.latitude) }}{% endif %})</span>
+      <input type="text" name="aprs_latitude" value="{{ cfg.aprs_latitude }}" inputmode="decimal">
+    </label>
+    <label>Zeměpisná délka <span class="hint">(prázdné = poloha uzlu{% if own_position %} {{ '%.5f'|format(own_position.longitude) }}{% endif %})</span>
+      <input type="text" name="aprs_longitude" value="{{ cfg.aprs_longitude }}" inputmode="decimal">
+    </label>
+    <label>Komentář majáku
+      <input type="text" name="aprs_comment" value="{{ cfg.aprs_comment }}" maxlength="60">
+    </label>
+    <p class="hint">Dire Wolf se konfiguruje souborem {{ direwolf_config }}, který web přepíše při každém uložení. Změny se projeví po restartu příjmu.</p>
+  </fieldset>
+  <button type="submit">Uložit</button>
+</form>
+
+<h2 id="aprs-log">Výpis Dire Wolf</h2>
+<details class="radio-log" {{ 'open' if crashing or state == 'failed' }}>
+  <summary>Posledních 40 řádků</summary>
+  <pre>{{ log or 'Žádný záznam v journalu.' }}</pre>
+</details>
+
+<script>
+(() => {
+  const container = document.getElementById("aprs-map");
+  if (typeof L === "undefined") {
+    container.textContent = "Mapu se nepodařilo načíst (knihovna Leaflet a mapové podklady vyžadují internet).";
+    return;
+  }
+  const stations = {{ map_stations|tojson }};
+  const own = {{ own_position|tojson }};
+  const map = L.map(container, { scrollWheelZoom: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const points = stations.map((s) => [s.latitude, s.longitude]);
+  if (own) points.push([own.latitude, own.longitude]);
+  if (points.length === 0) map.setView([49.8, 15.5], 7);
+  else if (points.length === 1) map.setView(points[0], 11);
+  else map.fitBounds(points, { padding: [24, 24], maxZoom: 13 });
+
+  const linkColor = getComputedStyle(document.documentElement).getPropertyValue("--accent-hover").trim() || "#c0910f";
+  const label = (marker, text, faded) => marker.bindTooltip(esc(text), {
+    permanent: true, direction: "right", offset: [8, 0], className: "map-call" + (faded ? " map-call-faded" : "") });
+
+  if (own) {
+    label(L.circleMarker([own.latitude, own.longitude], { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 }),
+      {{ (cfg.aprs_callsign or cfg.callsign)|tojson }}).addTo(map).bindPopup("vlastní poloha");
+  }
+  for (const s of stations) {
+    const fade = s.presence === "gone" ? 0.35 : 1;
+    if (own && s.direct) {
+      L.polyline([[own.latitude, own.longitude], [s.latitude, s.longitude]],
+        { color: linkColor, weight: 2, opacity: 0.6 * fade }).addTo(map);
+    }
+    const color = s.direct ? "#2e9d4f" : "#8a8a8a";
+    label(L.circleMarker([s.latitude, s.longitude], {
+      radius: 7, color, weight: 2, opacity: fade, fillColor: color,
+      fillOpacity: (s.direct ? 0.85 : 0.35) * fade, dashArray: s.direct ? null : "3 3",
+    }), s.source, s.presence === "gone").addTo(map).bindPopup(
+      `<strong>${esc(s.source)}</strong>` + (s.symbol ? ` <code>${esc(s.symbol_table)}${esc(s.symbol)}</code>` : "") + "<br>" +
+      `${s.direct ? "slyšeno napřímo" : "přes " + esc(s.heard_from || "digipeater")}` +
+      (s.path ? `<br>cesta: ${esc(s.path)}` : "") +
+      (s.distance_km != null ? `<br>vzdálenost: ${esc(s.distance_km)} km` : "") +
+      (s.comment ? `<br>${esc(s.comment)}` : "") +
+      `<br>naposledy: ${esc(s.last_seen_label)} (${esc(s.age_label)}) · paketů ${esc(s.packets)}`);
+  }
+})();
+</script>
+{% endblock %}

@@ -10,6 +10,8 @@ gateway.db so the web UI can show status and history.
   * mesh -> email : listens on UDP, relays group text messages to email.
   * email -> mesh : watches a Maildir 'new' folder, forwards new mail
                      (subject/body, truncated) as a group message.
+  * APRS monitor  : reads packets the RTL-SDR iGate (Dire Wolf) decodes
+                     from its KISS port and logs them for the APRS tab.
 
 Run alongside webapp.py (see systemd/ for service files).
 """
@@ -29,6 +31,7 @@ from email import policy
 from email.parser import BytesParser
 from email.mime.text import MIMEText
 
+import aprs_rx
 import common
 
 logging.basicConfig(
@@ -558,6 +561,67 @@ def poll_maildir():
 # heartbeat so the web UI knows the daemon is alive
 # ---------------------------------------------------------------------
 
+APRS_MONITOR_HEARTBEAT = "aprs-monitor"
+APRS_PRUNE_INTERVAL = 3600
+
+
+def store_aprs_frame(frame: bytes) -> dict | None:
+    """Decode one AX.25 frame from Dire Wolf and log it; None for non-APRS frames."""
+    packet = aprs_rx.ax25_packet(frame)
+    if packet is None:
+        return None
+    packet.update(aprs_rx.decode(packet))
+    packet["received_at"] = time.time()
+    common.record_aprs_packet(packet)
+    return packet
+
+
+def aprs_monitor(stop: threading.Event = None, sleep=time.sleep):
+    """Keep a KISS connection to Dire Wolf while APRS reception is on; reconnect on any error."""
+    stop = stop or threading.Event()
+    last_prune = 0.0
+    while not stop.is_set():
+        cfg = common.load_config()
+        if not cfg.get("aprs_enabled"):
+            sleep(10)
+            continue
+        if time.time() - last_prune > APRS_PRUNE_INTERVAL:
+            try:
+                common.prune_aprs_packets(float(cfg.get("aprs_keep_days", 30) or 30))
+            except (sqlite3.Error, ValueError) as exc:
+                log.warning("Could not prune old APRS packets: %s", exc)
+            last_prune = time.time()
+        port = int(cfg.get("aprs_kiss_port", 8001) or 8001)
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+                sock.settimeout(10)
+                log.info("APRS monitor connected to Dire Wolf KISS port %d", port)
+                buffer = b""
+                while not stop.is_set():
+                    common.set_heartbeat(APRS_MONITOR_HEARTBEAT)
+                    try:
+                        data = sock.recv(4096)
+                    except socket.timeout:
+                        current = common.load_config()
+                        if not current.get("aprs_enabled") or int(current.get("aprs_kiss_port", port)) != port:
+                            break
+                        continue
+                    if not data:
+                        log.info("Dire Wolf closed the KISS connection")
+                        break
+                    frames, buffer = aprs_rx.kiss_frames(buffer + data)
+                    if len(buffer) > 4096:
+                        buffer = b""
+                    for frame in frames:
+                        try:
+                            store_aprs_frame(frame)
+                        except sqlite3.Error as exc:
+                            log.warning("Could not store APRS packet: %s", exc)
+        except OSError:
+            pass  # Dire Wolf not running (yet); try again shortly
+        sleep(5)
+
+
 def heartbeat_loop():
     while True:
         common.set_heartbeat("gateway")
@@ -580,6 +644,7 @@ def main():
     ]
     if cfg.get("imap_host"):
         threads.append(threading.Thread(target=poll_imap, name="imap-watcher", daemon=True))
+    threads.append(threading.Thread(target=aprs_monitor, name="aprs-monitor", daemon=True))
     threads.append(threading.Thread(target=heartbeat_loop, name="heartbeat", daemon=True))
     for t in threads:
         t.start()

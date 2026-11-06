@@ -748,6 +748,7 @@ Pokud stránka zůstává prázdná:
 | 8300–8301/TCP | VARA nebo XARA (ARQ, data) | výchozí, kapitola 11; jen jeden z nich |
 | 8100/TCP | XARA KISS | jen `127.0.0.1` |
 | 4532/TCP | rigctld (CAT) | jen `127.0.0.1` |
+| 8001/TCP, 8000/TCP | Dire Wolf KISS, AGW (APRS RTL-SDR) | kapitola 13; Dire Wolf naslouchá na všech rozhraních, jen LAN/VPN |
 | 8400–8401/TCP | Mercury (ARQ, data) | `-p 8400`, aby nekolidoval s VARA |
 | 10088/TCP | webové GUI Mercury | `-G -U`; bez přihlášení, jen LAN/VPN |
 | 8090/TCP | webové rozhraní XARA | volitelné, jen pro čtení, jen LAN/VPN |
@@ -1662,3 +1663,95 @@ Každá stažená zpráva pak přistane v místní schránce i v BBS u uživatel
 | Karta TNC ukazuje „Padá, restartuje se“ | otevřete panel *Výpis a provoz* pro daný TNC; poslední řádky (`Traceback`, `RuntimeError`, `No such file`) ukazují příčinu – typicky GPIO, SPI nebo chybějící balík (12.1) |
 | Panel výpisu je prázdný nebo hlásí nedostupný výpis | `sudo usermod -aG systemd-journal ok2zaw`, restart webu; ručně `journalctl --user-unit=meshcom-tnc1 -n 50` |
 | Záložka BPQ hlásí, že služba není vytvořená | povolte TNC (TNC je osazen) a uložte nastavení na záložce BPQ |
+
+## 13. APRS RX iGate s RTL-SDR (experimentální)
+
+Záložka **APRS** z RTL-SDR dongle udělá přijímací APRS iGate:
+
+- `rtl_fm` naladí 144,800 MHz a pošle demodulovaný zvuk do programu
+  [Dire Wolf](https://github.com/wb2osz/direwolf),
+- Dire Wolf dekóduje AFSK 1200 Bd a jako *RX-only iGate* posílá přijaté
+  pakety do APRS-IS a každých 30 minut tam ohlásí polohu iGate,
+- gateway čte dekódované pakety z KISS portu Dire Wolf a ukládá je do
+  databáze; záložka ukazuje mapu stanic, tabulku stanic, posledních 200
+  paketů, provoz za hodinu a den, stav připojení k APRS-IS a výpis Dire Wolf.
+
+RTL-SDR nevysílá, takže do éteru nejde nic (žádný digipeater ani IGate
+RF→IS→RF). Příjem běží jako uživatelská služba `meshcom-aprs.service`
+i bez přihlášeného desktopu a startuje po zapnutí Pi.
+
+### 13.1 Instalace
+
+```bash
+sudo apt install -y rtl-sdr direwolf
+sudo usermod -aG plugdev ok2zaw
+.venv/bin/python -m pip install -r requirements.txt   # knihovna aprslib pro dekódování poloh
+sudo loginctl enable-linger ok2zaw                    # služby uživatele i bez přihlášení
+```
+
+Jádro Linuxu má pro RTL2832U ovladač DVB-T televize, který dongle obsadí.
+Zakažte ho a Pi restartujte:
+
+```bash
+echo 'blacklist dvb_usb_rtl28xxu' | sudo tee /etc/modprobe.d/blacklist-rtl-sdr.conf
+sudo reboot
+```
+
+Po restartu ověřte, že dongle odpovídá (Ctrl+C ukončí test):
+
+```bash
+rtl_test -t
+```
+
+Výpis má obsahovat `Found 1 device(s)` a typ tuneru (např. `R820T`). Hláška
+`usb_claim_interface error -6` znamená, že dongle stále drží ovladač DVB-T.
+Po aktualizaci projektu přes web restartujte gateway
+(`sudo systemctl restart meshcom-gateway meshcom-web`), aby se načetl monitor
+paketů.
+
+### 13.2 Nastavení na záložce APRS
+
+1. Zaškrtněte *APRS příjem zapnutý* a *Spouštět po startu Pi*.
+2. **Volací značka iGate** se SSID, např. `OK2ZAW-1`. Nepoužívejte stejnou
+   značku jako MeshCom uzel (`callsign` gateway): MeshCom server ji už
+   do APRS-IS hlásí a dvě spojení se stejnou značkou se navzájem odpojují.
+3. **Passcode** nechte prázdné – web ho spočítá ze značky (zobrazí se
+   v nápovědě pole).
+4. **Kmitočet** 144.800 MHz (Evropa). **Zisk** nechte automatický; pokud
+   příjem nefunguje, zkuste 30–45 dB.
+5. **Korekce ppm:** levné dongly se liší až o desítky ppm, při 144,8 MHz je
+   10 ppm = 1,4 kHz. Dongly s TCXO (RTL-SDR Blog V3/V4) mají ±1 ppm
+   a korekci nepotřebují. Odchylku změříte příkazem `rtl_test -p`
+   (běží několik minut, údaj `cumulative PPM` po ustálení) – příjem při tom
+   musí být zastavený.
+6. **Maják polohy** se posílá jen do APRS-IS. Prázdná poloha = poloha uzlu
+   z mapy RF stanic (maják MeshCom uzlu nebo ruční poloha).
+7. Uložte a klikněte na **Spustit**.
+
+Web zapíše `~/.config/meshcom/direwolf-aprs.conf` a
+`~/.config/systemd/user/meshcom-aprs.service`; oba soubory přepíše při
+každém uložení, změny se projeví po **Restartu** příjmu.
+
+Kontrola z příkazové řádky:
+
+```bash
+systemctl --user status meshcom-aprs
+journalctl --user-unit=meshcom-aprs -n 50
+```
+
+Na kartě *APRS-IS iGate* se po připojení objeví 🟢 Připojeno; přijaté pakety
+uvidíte i na https://aprs.fi u své značky iGate (záložka *raw packets*,
+pole *via*).
+
+### 13.3 Řešení problémů
+
+| Problém | Řešení |
+| --- | --- |
+| Služba hned padá, ve výpisu `No supported devices found` | dongle není připojený nebo ho drží jiný program (`rtl_tcp`, jiná SDR aplikace); `rtl_test -t` |
+| `usb_claim_interface error -6` | ovladač DVB-T: blacklist z 13.1 a restart |
+| `Permission denied` / `Failed to open rtlsdr device` | skupina `plugdev` (a pravidla udev z balíčku `rtl-sdr`), odhlásit/restart |
+| Služba běží, ale nepřichází žádné pakety | anténa pro 2 m, korekce ppm, zisk ručně 30–45 dB; ve výpisu Dire Wolf musí být řádky s dekódovanými pakety |
+| Pakety ve výpisu, ale tabulka prázdná | karta *Monitor paketů*: gateway musí běžet a KISS port v nastavení odpovídat; restart `meshcom-gateway` |
+| iGate 🔴 Odpojeno | síť, název serveru (`euro.aprs2.net`), passcode; ve výpisu hledejte `IGate server` |
+| Mapa bez stanic | stanice v období neposlaly polohu, nebo chybí knihovna `aprslib` (`pip install -r requirements.txt`) |
+

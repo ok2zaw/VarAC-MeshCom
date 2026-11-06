@@ -33,10 +33,12 @@ from functools import wraps
 
 from flask import Flask, abort, flash, request, redirect, url_for, render_template, Response, session
 
+import aprs_rx
 import bpq_config
 import bpq_services
 import common
 import gateway
+import ports
 import radio_apps
 import system_time
 import update_manager
@@ -600,6 +602,13 @@ def _save_xara_settings(form_data, cfg, new_cfg, errors):
     for key, name in (("radio_xara_command", "xara"), ("radio_rigctld_command", "rigctld")):
         if os.path.basename(new_cfg[key] or name) != name:
             errors.append(f"{key}: povolen je jen program {name}.")
+    rig_port = numbers.get("rigctld_port")
+    modem_ports = {radio_apps.VARA_PORT, radio_apps.VARA_PORT + 1, radio_apps.XARA_KISS_PORT}
+    if numbers.get("xara_port"):
+        modem_ports |= {numbers["xara_port"], numbers["xara_port"] + 1}
+    mercury = radio_apps.mercury_port(new_cfg)
+    if rig_port in modem_ports | {mercury, mercury + 1}:
+        errors.append(f"rigctld: port {rig_port} používá modem (VARA, XARA nebo Mercury).")
     modem_port, ui_port = numbers.get("xara_port"), numbers.get("xara_ui_port")
     if modem_port and ui_port:
         if ui_port in {modem_port, modem_port + 1, radio_apps.XARA_KISS_PORT, numbers.get("rigctld_port")}:
@@ -643,6 +652,7 @@ def save_radio_settings(form_data, cfg):
         new_cfg[f"radio_{app_name}_delay"] = delay
 
     _save_xara_settings(form_data, cfg, new_cfg, errors)
+    errors.extend(ports.conflicts(new_cfg, "radio"))
     for key in ("radio_vara_path", "radio_varac_path"):
         if new_cfg[key] and not new_cfg[key].lower().endswith(".exe"):
             errors.append(f"{key}: cesta musí končit na .exe.")
@@ -770,6 +780,7 @@ def save_bpq_settings(form_data, cfg):
             continue
         new_cfg[f"{service}_delay"] = delay
     errors.extend(bpq_services.validate(new_cfg))
+    errors.extend(ports.conflicts(new_cfg, "bpq"))
     return new_cfg, errors
 
 
@@ -794,7 +805,8 @@ def save_bpq_node_settings(form_data, cfg):
         bpq_config.settings(new_cfg)
     except radio_apps.RadioError as exc:
         return new_cfg, str(exc)
-    return new_cfg, None
+    clashes = ports.conflicts(new_cfg, "bpq")
+    return new_cfg, " ".join(clashes) if clashes else None
 
 
 @app.route("/bpq", methods=["GET", "POST"])
@@ -879,6 +891,133 @@ def bpq():
         bpq_cfg_exists=os.path.exists(bpq_cfg_path), ax25_fields=bpq_config.AX25_FIELDS,
         bandwidths=bpq_services.BANDWIDTHS,
         bpq_web_url=f"http://{request.host.split(':')[0]}:{cfg.get('linbpq_web_port', 8008)}/",
+    )
+
+
+APRS_PERIODS = {1: "1 h", 6: "6 h", 24: "24 h", 72: "3 dny", 168: "7 dní"}
+APRS_TEXT_FIELDS = ("aprs_callsign", "aprs_passcode", "aprs_frequency_mhz", "aprs_gain", "aprs_ppm",
+                    "aprs_device", "aprs_kiss_port", "aprs_server", "aprs_latitude", "aprs_longitude",
+                    "aprs_comment", "aprs_delay", "aprs_keep_days")
+
+
+def save_aprs_settings(form_data, cfg):
+    """New config from the APRS form and a list of errors (settings are validated only when enabled)."""
+    new_cfg = dict(cfg)
+    errors = []
+    for key in APRS_TEXT_FIELDS:
+        new_cfg[key] = str(form_data.get(key, cfg.get(key, ""))).strip()
+    new_cfg["aprs_callsign"] = new_cfg["aprs_callsign"].upper()
+    for key in ("aprs_enabled", "aprs_autostart", "aprs_igate", "aprs_beacon"):
+        new_cfg[key] = form_data.get(key) == "on"
+    for key, label, low, high in (("aprs_delay", "Zpoždění", 0, aprs_rx.MAX_DELAY_SECONDS),
+                                  ("aprs_keep_days", "Doba uchování", 1, 365)):
+        try:
+            value = int(new_cfg[key])
+            if not low <= value <= high:
+                raise ValueError
+            new_cfg[key] = value
+        except ValueError:
+            errors.append(f"APRS: {label} musí být {low} až {high}.")
+    try:
+        new_cfg["aprs_kiss_port"] = int(new_cfg["aprs_kiss_port"])
+        new_cfg["aprs_ppm"] = int(new_cfg["aprs_ppm"] or 0)
+    except ValueError:
+        pass  # aprs_rx.settings reports it with a proper message
+    if new_cfg["aprs_enabled"]:
+        try:
+            aprs_rx.settings(new_cfg, common.get_own_position())
+        except radio_apps.RadioError as exc:
+            errors.append(str(exc))
+        errors.extend(ports.conflicts(new_cfg, "aprs"))
+    return new_cfg, errors
+
+
+@app.route("/aprs", methods=["GET", "POST"])
+@requires_auth
+def aprs():
+    cfg = common.load_config()
+    if request.method == "POST":
+        require_csrf_token()
+        action = request.form.get("action")
+        if action == "save":
+            new_cfg, errors = save_aprs_settings(request.form, cfg)
+            if errors:
+                for message in errors:
+                    flash(message, "error")
+            else:
+                common.save_config(new_cfg)
+                try:
+                    aprs_rx.write_unit(new_cfg, common.get_own_position())
+                except (OSError, radio_apps.RadioError) as exc:
+                    flash(f"Nastavení uloženo, ale službu se nepodařilo zapsat: {exc}", "error")
+                else:
+                    flash("Nastavení uloženo." + (" Běžící příjem restartujte, aby změny použil."
+                                                  if new_cfg["aprs_enabled"] else " APRS příjem je vypnutý."),
+                          "success")
+            return redirect(url_for("aprs", _anchor="aprs-settings"))
+        if action in {"start", "stop", "restart"}:
+            try:
+                if action == "start":
+                    flash("APRS příjem se spouští." if aprs_rx.start() else "APRS příjem už běží.", "success")
+                elif action == "stop":
+                    aprs_rx.stop()
+                    flash("APRS příjem zastaven.", "success")
+                else:
+                    aprs_rx.restart()
+                    flash("APRS příjem se restartuje.", "success")
+            except radio_apps.RadioError as exc:
+                flash(f"APRS: {exc}", "error")
+            return redirect(url_for("aprs"))
+        abort(400, description="Neznámá akce.")
+
+    try:
+        hours = int(request.args.get("hours", 24))
+    except ValueError:
+        hours = 24
+    hours = hours if hours in APRS_PERIODS else 24
+    selected = request.args.get("station", "").strip().upper()
+    now = time.time()
+    since = now - hours * 3600
+    own_position = common.get_own_position()
+    stations = common.get_aprs_stations(since)
+    map_stations = []
+    for row in stations:
+        row["presence"] = common.station_presence(row["last_seen"], now)
+        row["presence_icon"], row["presence_label"] = common.STATION_PRESENCE[row["presence"]]
+        row["age_label"] = common.age_label(now - row["last_seen"])
+        row["last_seen_label"] = format_ts(row["last_seen"], cfg)
+        row["direct"] = row["heard_from"] == row["source"]
+        row["distance_km"] = None
+        if row["latitude"] is not None and own_position:
+            row["distance_km"] = round(common.distance_km(
+                own_position["latitude"], own_position["longitude"], row["latitude"], row["longitude"]), 1)
+        if row["latitude"] is not None:
+            map_stations.append({key: row[key] for key in (
+                "source", "latitude", "longitude", "direct", "heard_from", "path", "symbol_table", "symbol",
+                "comment", "packets", "last_seen_label", "age_label", "presence", "distance_km")})
+    packets = common.get_aprs_packets(since, selected, limit=200)
+    for row in packets:
+        row["received_label"] = format_ts(row["received_at"], cfg)
+        row["tnc2"] = aprs_rx.tnc2(row)
+
+    service = aprs_rx.status()
+    log_text = aprs_rx.recent_log(200)  # long enough to find the last APRS-IS (dis)connect
+    monitor_hb = common.get_heartbeat(gateway.APRS_MONITOR_HEARTBEAT)
+    try:
+        values, settings_error = aprs_rx.settings(cfg, own_position), None
+    except radio_apps.RadioError as exc:
+        values, settings_error = None, str(exc)
+    counts = common.get_aprs_counts(now)
+    return render_template(
+        "aprs.html", cfg=cfg, hours=hours, periods=APRS_PERIODS, selected=selected,
+        stations=stations, map_stations=map_stations, packets=packets, own_position=own_position,
+        counts=counts, last_label=common.age_label(now - counts["last"]) if counts["last"] else None,
+        service=service, unit_exists=os.path.exists(aprs_rx.unit_path()),
+        log="\n".join(log_text.splitlines()[-40:]), igate_state=aprs_rx.igate_state(log_text),
+        monitor_alive=monitor_hb is not None and now - monitor_hb < 30,
+        missing=aprs_rx.missing_programs(), values=values, settings_error=settings_error,
+        computed_passcode=aprs_rx.passcode(cfg["aprs_callsign"]) if cfg.get("aprs_callsign") else None,
+        direwolf_config=aprs_rx.DIREWOLF_CONFIG,
     )
 
 
