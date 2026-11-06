@@ -745,9 +745,12 @@ Pokud stránka zůstává prázdná:
 | 1799/UDP | MeshCom ExtUDP | gateway ⇄ uzel MeshCom |
 | 8899/TCP | web gateway | jen LAN/VPN |
 | 25, 587, 993/TCP | Postfix, Dovecot | kapitola 8, jen LAN/VPN |
-| 8300–8301/TCP | VARA (ARQ, data) | výchozí, kapitola 11 |
+| 8300–8301/TCP | VARA nebo XARA (ARQ, data) | výchozí, kapitola 11; jen jeden z nich |
+| 8100/TCP | XARA KISS | jen `127.0.0.1` |
+| 4532/TCP | rigctld (CAT) | jen `127.0.0.1` |
 | 8400–8401/TCP | Mercury (ARQ, data) | `-p 8400`, aby nekolidoval s VARA |
 | 10088/TCP | webové GUI Mercury | `-G -U`; bez přihlášení, jen LAN/VPN |
+| 8090/TCP | webové rozhraní XARA | volitelné, jen pro čtení, jen LAN/VPN |
 | 10001, 10002/TCP | LoRa TNC1, TNC2 (KISS) | jen `127.0.0.1` |
 | 8008, 8010/TCP | LinBPQ web, telnet | jen LAN/VPN |
 | 8025, 8110/TCP | BPQMail SMTP, POP3 | kapitola 12.6 |
@@ -856,15 +859,15 @@ Nevýhody:
 Tato varianta není veřejný mailserver: veřejnou adresu a příjem z internetu
 nadále zajišťuje vlastní server. Raspberry používá jeho SMTP/IMAP rozhraní.
 
-## 11. VARA, Mercury a VarAC na Raspberry Pi (experimentální)
+## 11. VARA, XARA, Mercury a VarAC na Raspberry Pi (experimentální)
 
 VARA (EA5HVK) i VarAC jsou programy pro Windows. Na Raspberry Pi se spouštějí
 přes **Wine** a emulaci x86; tento postup používá instalátor Winelink s Box86.
 Raspberry Pi 4 je doporučené, na Pi 3 počítejte s pomalým během. Na Pi 5 je
 nutné přepnout jádro na 4KB stránky. Provoz je experimentální: počítejte s
 vyšší zátěží CPU, občasnými pády GUI a nutností ladění zvuku a PTT. Mercury
-běží samostatně nativně na ARM64 Linuxu. Gateway samotná (kapitoly 2–7) na
-Wine nezávisí.
+běží samostatně nativně na ARM64 Linuxu, stejně jako XARA – nativní náhrada
+VARA (11.5). Gateway samotná (kapitoly 2–7) na Wine nezávisí.
 
 ### 11.1 Instalace VARA a VarAC od nuly
 
@@ -1072,15 +1075,94 @@ Grafická aplikace `mercury-ui` (Fyne) obsahuje vlastní kopii modemu, proto ji
 nespouštějte současně s Mercury ze záložky VarAC. Pro vzdálený provoz na Pi je
 webové GUI vhodnější.
 
-### 11.5 Ovládání z webu – záložka VarAC
+### 11.5 XARA – nativní modem kompatibilní s VARA (volitelně)
+
+[XARA](https://github.com/x0rro/xara) je open-source modem (MIT, Rust), který
+mluví protokolem VARA HF a VARA FM a nabízí stejné TCP rozhraní (příkazy
+`8300`, data `8301`, KISS `8100`). Autor ho testoval proti VARA HF 4.9.0 a
+VARA FM 4.4.0. Běží nativně na ARM64 bez Wine, Box64 a desktopu, takže Pi
+zatíží mnohem méně než VARA. VarAC (pod Wine) se k němu připojí stejně jako
+k VARA. Projekt je nový (první verze 10/2026) – VARA si nechte jako zálohu.
+
+Instalace hotové binárky pro 64bit Raspberry Pi OS (aarch64), s kontrolou
+SHA256:
+
+```bash
+VER=0.1.3
+cd /tmp
+wget https://github.com/x0rro/xara/releases/download/v$VER/xara-$VER-aarch64-unknown-linux-gnu.tar.xz
+wget https://github.com/x0rro/xara/releases/download/v$VER/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing     # musí vypsat OK
+tar -xJf xara-$VER-aarch64-unknown-linux-gnu.tar.xz
+sudo install -m 755 xara-$VER-aarch64-unknown-linux-gnu/xara /usr/local/bin/xara
+xara --version
+```
+
+Systémovou službu ani uživatele `xara` z balíčku (`dist/install.sh`)
+neinstalujte – XARA spouští záložka **VarAC** jako ostatní programy pod účtem
+gateway. Účet potřebuje přístup ke zvukové kartě a sériovému portu rádia:
+
+```bash
+sudo usermod -aG audio,dialout ok2zaw    # pak odhlásit/přihlásit nebo restart
+sudo apt install -y libhamlib-utils      # rigctld a rigctl pro CAT
+```
+
+**Zvuk:** na záložce **VarAC** v části *XARA* vyberte USB zvukovou kartu
+rádia. Nabídka čte `/proc/asound/cards` (USB karty jsou nahoře) a ukládá
+stabilní název `plughw:CARD=<jméno>,DEV=0`, který se nemění s pořadím karet po
+startu. Stejnou kartu XARA použije pro příjem i vysílání. Ruční kontrola:
+`xara --list-devices --audio alsa`. Kartu nesmí současně držet VARA ani
+Mercury.
+
+**PTT přes CAT:** XARA klíčuje vysílač přes hamlib `rigctld`, který web také
+spouští (karta *rigctld (CAT)*). V části *CAT – rigctld* vyplňte:
+
+- *Model rádia* – číslo modelu hamlib; pole nabízí seznam z `rigctl -l`
+  (např. `3073` = Icom IC-7300; číslo svého rádia najdete v `rigctl -l`),
+- *Sériový port* – nabídka z `/dev/serial/by-id/` (stabilní názvy),
+- *Rychlost* – podle nastavení CAT v rádiu, nebo výchozí pro model.
+
+rigctld naslouchá jen na `127.0.0.1:4532`. Test bez XARA:
+
+```bash
+rigctl -m 2 -r 127.0.0.1:4532 f      # vypíše frekvenci
+rigctl -m 2 -r 127.0.0.1:4532 T 1    # PTT zapnout (pozor, vysílá!)
+rigctl -m 2 -r 127.0.0.1:4532 T 0
+```
+
+Sériový port rádia smí mít otevřený jen jeden program. Pokud má VarAC ovládat
+frekvenci, nastavte mu CAT přes hamlib/rigctld na `127.0.0.1:4532` (pokud to
+vaše verze VarAC umí); jinak CAT ve VarAC vypněte.
+
+**Další volby:** režim (HF 500/2300/2750 Hz, FM narrow/wide), úroveň vysílání
+(`drive-db`, 0 až −40 dB; začněte na −5 a dolaďte podle ALC), TCP port modemu
+a volitelný port webového rozhraní XARA (např. `8090`; stav modemu, jen pro
+čtení – volba `ui-control`, která by dovolila klíčovat vysílač z prohlížeče,
+se nezapíná). Volací značka je prázdná = značka gateway bez SSID.
+
+Web při každém spuštění XARA zapíše `~/.config/xara/xara.conf` (stejný soubor
+čte i ručně spuštěný `xara`). Ručně upravený soubor bez hlavičky webu se
+předtím uloží jako `xara.conf.bak`. Změny nastavení se projeví po restartu
+XARA.
+
+**Ve VarAC** nastavte modem na `127.0.0.1`, port `8300` (nebo hodnotu z pole
+*TCP port modemu*). XARA a VARA mají stejný výchozí port, proto vždy
+spouštějte jen jeden z nich; záložka VarAC na souběh upozorní. Doporučené
+zpoždění autostartu: rigctld 5 s, XARA 10 s, VarAC 40 s.
+
+Vyšší rychlosti (`--registered`) vyžadují vlastní překlad s volbou
+`registered` a jsou určené jen pro majitele registrované VARA.
+
+### 11.6 Ovládání z webu – záložka VarAC
 
 Záložka **VarAC** ve webovém rozhraní gateway spouští, zastavuje a restartuje
-VARA, Mercury a VarAC, zobrazuje jejich stav a poslední výpis a nastavuje
+rigctld, VARA, XARA, Mercury a VarAC, zobrazuje jejich stav a poslední výpis a nastavuje
 automatický start po přihlášení do desktopu se zpožděním pro každý program
 zvlášť (např. VARA 10 s, Mercury 10 s, VarAC 40 s).
 
-Programy běží jako uživatelské systemd jednotky (`meshcom-radio-vara`,
-`meshcom-radio-mercury`, `meshcom-radio-varac` a sdílený
+Programy běží jako uživatelské systemd jednotky (`meshcom-radio-rigctld`,
+`meshcom-radio-vara`, `meshcom-radio-xara`, `meshcom-radio-mercury`,
+`meshcom-radio-varac` a sdílený
 `meshcom-radio-wineserver`). Restart nebo aktualizace webu je proto nezastaví.
 
 Jednorázová příprava:
@@ -1118,9 +1200,9 @@ journalctl --user -u meshcom-radio-varac -n 50
 
 > **Bezpečnost:** Záložka spouští programy pod účtem `ok2zaw`. Web proto
 > zpřístupněte jen v důvěryhodné síti se silným heslem. Spustit lze pouze
-> soubory `.exe` přes Wine a program `mercury`.
+> soubory `.exe` přes Wine a programy `mercury`, `xara` a `rigctld`.
 
-### 11.6 Řešení problémů
+### 11.7 Řešení problémů
 
 Zdroje:
 
@@ -1139,6 +1221,9 @@ Zdroje:
 | Program na záložce VarAC hned skončí (Chyba) | rozbalte jeho výpis na záložce, nebo `journalctl --user -u meshcom-radio-<program>` |
 | Okno VARA/VarAC se neobjeví | zkontrolujte přihlášený desktop a hodnotu Displej (`echo $DISPLAY` v terminálu desktopu) |
 | VarAC se nepřipojí k Mercury | port ve VarAC musí odpovídat `-p` v parametrech Mercury |
+| XARA hned skončí (Chyba) | výpis na záložce: `rigctld … connection refused` = rigctld neběží (spusťte ho dřív); chyba zvuku = špatná karta nebo ji drží VARA/Mercury; `Permission denied` = skupina `audio` |
+| XARA běží, ale nevysílá | test PTT přes `rigctl … T 1` (11.5); zkontrolujte model a rychlost CAT, skupinu `dialout`; úroveň `drive-db` a ALC rádia |
+| rigctld hned skončí | špatný model, port nebo rychlost; ručně `rigctld -m <model> -r <port> -s <rychlost> -vvvv` |
 | GUI Mercury se nenačte | Mercury musí běžet se zapnutým webovým GUI (po změně restart); `ss -ltn \| grep 10088`; port nesmí používat jiná služba (Webmin) ani být blokován prohlížečem (`ERR_UNSAFE_PORT` u 10080) |
 | Vysoká teplota, nízký výkon | `vcgencmd measure_temp`, `vcgencmd get_throttled`; použijte aktivní chladič |
 
@@ -1428,7 +1513,7 @@ LinBPQ, zobrazuje jejich stav a výpis a nastavuje start po spuštění Raspberr
 Pi se zpožděním. LinBPQ se vždy spouští až po obou TNC. Na rozdíl od VARA a
 VarAC nepotřebují přihlášený desktop.
 
-1. Povolte uživatelský systemd bez přihlášení (stačí jednou, viz i 11.5):
+1. Povolte uživatelský systemd bez přihlášení (stačí jednou, viz i 11.6):
 
    ```bash
    sudo loginctl enable-linger ok2zaw

@@ -545,7 +545,65 @@ def email_aliases():
 RADIO_TEXT_FIELDS = (
     "radio_display", "radio_wine_prefix", "radio_vara_path",
     "radio_mercury_command", "radio_mercury_args", "radio_varac_path",
+    "radio_xara_command", "xara_call", "xara_audio_device", "radio_rigctld_command", "rigctld_device",
 )
+
+
+def _save_xara_settings(form_data, cfg, new_cfg, errors):
+    new_cfg["xara_call"] = new_cfg["xara_call"].upper()
+    for key, choices in (("xara_mode", radio_apps.XARA_MODES), ("xara_ptt", radio_apps.XARA_PTT)):
+        value = form_data.get(key, cfg.get(key))
+        if value in choices:
+            new_cfg[key] = value
+        else:
+            errors.append(f"{key}: neznámá hodnota.")
+    try:
+        drive_db = float(form_data.get("xara_drive_db", cfg.get("xara_drive_db", -5)))
+        if not -40 <= drive_db <= 0:
+            raise ValueError
+        new_cfg["xara_drive_db"] = drive_db
+    except (TypeError, ValueError):
+        errors.append("XARA: úroveň vysílání musí být −40 až 0 dB.")
+
+    numbers = {}
+    for key, label, low, high, zero_ok in (
+        ("xara_port", "XARA: TCP port modemu", 1024, 65534, False),
+        ("xara_ui_port", "XARA: port webového rozhraní", 1024, 65535, True),
+        ("rigctld_port", "rigctld: TCP port", 1024, 65535, False),
+        ("rigctld_model", "rigctld: model rádia", 1, 999999, True),
+    ):
+        raw = str(form_data.get(key, cfg.get(key, ""))).strip()
+        try:
+            value = int(raw) if raw else 0
+            if not (zero_ok and value == 0) and not low <= value <= high:
+                raise ValueError
+        except ValueError:
+            errors.append(f"{label} musí být {low} až {high}" + (" (nebo prázdné/0)." if zero_ok else "."))
+            continue
+        numbers[key] = value
+        new_cfg[key] = value if value or key != "rigctld_model" else ""
+    try:
+        speed = int(form_data.get("rigctld_speed", cfg.get("rigctld_speed", 0)))
+        if speed not in radio_apps.RIGCTLD_SPEEDS:
+            raise ValueError
+        new_cfg["rigctld_speed"] = speed
+    except (TypeError, ValueError):
+        errors.append("rigctld: neplatná rychlost sériového portu.")
+
+    if new_cfg["xara_call"] and not radio_apps._CALLSIGN.match(new_cfg["xara_call"]):
+        errors.append("XARA: neplatná volací značka.")
+    for key in ("xara_audio_device", "rigctld_device"):
+        if new_cfg[key] and not radio_apps._DEVICE_NAME.match(new_cfg[key]):
+            errors.append(f"{key}: neplatný název zařízení.")
+    for key, name in (("radio_xara_command", "xara"), ("radio_rigctld_command", "rigctld")):
+        if os.path.basename(new_cfg[key] or name) != name:
+            errors.append(f"{key}: povolen je jen program {name}.")
+    modem_port, ui_port = numbers.get("xara_port"), numbers.get("xara_ui_port")
+    if modem_port and ui_port:
+        if ui_port in {modem_port, modem_port + 1, radio_apps.XARA_KISS_PORT, numbers.get("rigctld_port")}:
+            errors.append("XARA: port webového rozhraní koliduje s portem modemu, KISS nebo rigctld.")
+        elif ui_port in radio_apps.BROWSER_BLOCKED_PORTS:
+            errors.append(f"XARA: port {ui_port} prohlížeče blokují (ERR_UNSAFE_PORT), zvolte jiný.")
 
 
 def save_radio_settings(form_data, cfg):
@@ -571,7 +629,7 @@ def save_radio_settings(form_data, cfg):
         new_cfg["radio_mercury_gui_port"] = gui_port
     for app_name, spec in radio_apps.APPS.items():
         new_cfg[f"radio_{app_name}_autostart"] = form_data.get(f"radio_{app_name}_autostart") == "on"
-        raw_delay = form_data.get(f"radio_{app_name}_delay", "")
+        raw_delay = form_data.get(f"radio_{app_name}_delay", cfg.get(f"radio_{app_name}_delay", 0))
         try:
             delay = int(raw_delay)
         except (TypeError, ValueError):
@@ -582,6 +640,7 @@ def save_radio_settings(form_data, cfg):
             continue
         new_cfg[f"radio_{app_name}_delay"] = delay
 
+    _save_xara_settings(form_data, cfg, new_cfg, errors)
     for key in ("radio_vara_path", "radio_varac_path"):
         if new_cfg[key] and not new_cfg[key].lower().endswith(".exe"):
             errors.append(f"{key}: cesta musí končit na .exe.")
@@ -652,10 +711,13 @@ def radio():
             "delay": cfg.get(f"radio_{app_name}_delay", 0),
         })
     mercury_port = radio_apps.mercury_port(cfg)
-    port_conflict = mercury_port == radio_apps.DEFAULT_MODEM_PORT and (
-        cfg.get("radio_vara_autostart") and cfg.get("radio_mercury_autostart")
-        or all(item["status"]["state"] == "active" for item in apps if item["name"] in {"vara", "mercury"})
-    )
+    active = {item["name"] for item in apps if item["status"]["state"] == "active"}
+    port_conflicts = [(radio_apps.APPS[first]["label"], radio_apps.APPS[second]["label"], port)
+                      for first, second, port in radio_apps.port_conflicts(cfg, active)]
+    xara_ui_port = radio_apps.xara_ui_port(cfg)
+    xara_ui_url = f"http://{request.host.split(':')[0]}:{xara_ui_port}/" if xara_ui_port else None
+    xara_ui_listening = bool(xara_ui_url) and "xara" in active and port_listening(xara_ui_port)
+    rig_models = radio_apps.rig_models()
     mercury_gui_port = radio_apps.mercury_gui_port(cfg)
     mercury_gui_url = None
     mercury_gui_listening = False
@@ -666,8 +728,15 @@ def radio():
         "radio.html", cfg=cfg, apps=apps, mercury_port=mercury_port,
         mercury_gui_port=mercury_gui_port, mercury_gui_url=mercury_gui_url,
         mercury_gui_listening=mercury_gui_listening,
-        port_conflict=port_conflict,
+        port_conflicts=port_conflicts,
         autostart_present=os.path.exists(radio_apps.AUTOSTART_FILE),
+        xara_modes=radio_apps.XARA_MODES, xara_ptt=radio_apps.XARA_PTT,
+        xara_call=radio_apps.xara_call(cfg), xara_port=radio_apps.xara_port(cfg),
+        xara_ui_url=xara_ui_url, xara_ui_listening=xara_ui_listening,
+        xara_config_path=radio_apps.XARA_CONFIG_PATH,
+        sound_cards=radio_apps.sound_cards(), serial_devices=radio_apps.serial_devices(),
+        rig_models=rig_models, rig_model_names=dict(rig_models),
+        rigctld_speeds=radio_apps.RIGCTLD_SPEEDS, rigctld_port=radio_apps.rigctld_port(cfg),
     )
 
 

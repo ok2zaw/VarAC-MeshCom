@@ -3,11 +3,11 @@
 {% block content %}
 {% set state_labels = {"active": "Běží", "activating": "Spouští se", "deactivating": "Zastavuje se", "inactive": "Neběží", "failed": "Chyba", "unknown": "Neznámý"} %}
 <h1>VarAC a HF modemy</h1>
-<p class="monitor-note">Programy běží jako uživatelské systemd jednotky účtu gateway; restart webu je nezastaví. VARA a VarAC potřebují přihlášený desktop, Mercury běží i bez něj. <a class="clear-filter" href="{{ url_for('radio') }}">Obnovit stav</a></p>
+<p class="monitor-note">Programy běží jako uživatelské systemd jednotky účtu gateway; restart webu je nezastaví. VARA a VarAC potřebují přihlášený desktop, XARA, Mercury a rigctld běží i bez něj. XARA je nativní náhrada VARA (stejné TCP rozhraní) – v jednu chvíli používejte jen jeden z modemů. <a class="clear-filter" href="{{ url_for('radio') }}">Obnovit stav</a></p>
 
-{% if port_conflict %}
-<div class="flash error" role="alert">VARA i Mercury používají TCP port {{ mercury_port }}. Pro souběžný provoz nastavte Mercury jiný port, např. <code>-p 8400</code>.</div>
-{% endif %}
+{% for first, second, port in port_conflicts %}
+<div class="flash error" role="alert">{{ first }} a {{ second }} používají TCP port {{ port }}/{{ port + 1 }}. Spouštějte jen jeden z nich, nebo jednomu nastavte jiný port (Mercury např. <code>-p 8400</code>, XARA pole „TCP port modemu“).</div>
+{% endfor %}
 
 <div class="cards">
   {% for item in apps %}
@@ -20,6 +20,12 @@
       {% elif item.status.since %}od {{ item.status.since }}
       {% else %}autostart {{ 'zapnutý, za ' ~ item.delay ~ ' s' if item.autostart else 'vypnutý' }}{% endif %}
     </div>
+    {% if item.name == 'xara' %}
+    <div class="card-sub">VarAC: modem 127.0.0.1:{{ xara_port }}, {{ xara_modes[cfg.xara_mode][2] if cfg.xara_mode in xara_modes else '' }}, PTT {{ xara_ptt.get(cfg.xara_ptt, '') }}
+      {% if xara_ui_url and state == 'active' and not xara_ui_listening %}· webové rozhraní neodpovídá{% endif %}</div>
+    {% elif item.name == 'rigctld' %}
+    <div class="card-sub">{% if cfg.rigctld_model %}{{ rig_model_names.get(cfg.rigctld_model|int, 'model ' ~ cfg.rigctld_model) }}, {% endif %}127.0.0.1:{{ rigctld_port }} – spusťte před XARA</div>
+    {% endif %}
     {% if item.name == 'mercury' %}
     <div class="card-sub">
       {% if not mercury_gui_url %}Webové GUI je vypnuté – zapněte <a class="clear-filter" href="#mercury-gui">Webové GUI Mercury</a> níže, uložte a Mercury restartujte.
@@ -37,6 +43,9 @@
         <button type="submit"{% if action == 'stop' %} class="secondary"{% endif %}>{{ text }}</button>
       </form>
       {% endfor %}
+      {% if item.name == 'xara' and xara_ui_listening %}
+      <a class="button-link" href="{{ xara_ui_url }}" target="_blank" rel="noopener">Otevřít XARA</a>
+      {% endif %}
       {% if item.name == 'mercury' and mercury_gui_url and mercury_gui_listening %}
       <a class="button-link" href="{{ mercury_gui_url }}mercury.html" target="_blank" rel="noopener">Otevřít GUI</a>
       {% if not cfg.radio_mercury_no_waterfall %}<a class="button-link secondary" href="{{ mercury_gui_url }}waterfall.html" target="_blank" rel="noopener">Vodopád</a>{% endif %}
@@ -61,7 +70,7 @@
       <input type="number" name="radio_{{ item.name }}_delay" value="{{ item.delay }}" min="0" max="600">
     </label>
     {% endfor %}
-    <p class="hint">Zpoždění se počítá od přihlášení. VarAC nastavte později než modem, aby se k němu mohl připojit. Položka autostartu {{ 'existuje' if autostart_present else 'zatím neexistuje' }}.</p>
+    <p class="hint">Zpoždění se počítá od přihlášení. Pořadí: rigctld, pak modem (XARA nebo VARA), VarAC nejpozději, aby se k modemu mohl připojit. Položka autostartu {{ 'existuje' if autostart_present else 'zatím neexistuje' }}.</p>
   </fieldset>
 
   <fieldset>
@@ -96,6 +105,74 @@
       Bez vodopádu a spektra (šetří CPU; přepínač -W)
     </label>
     <p class="hint">Webové GUI Mercury nemá přihlášení – kdokoli v síti, kdo otevře jeho port, může modem ovládat. Port zpřístupněte jen v LAN/VPN. Změna se projeví po restartu Mercury.</p>
+  </fieldset>
+
+  <fieldset id="xara">
+    <legend>XARA – modem kompatibilní s VARA</legend>
+    <label>XARA – program
+      <input type="text" name="radio_xara_command" value="{{ cfg.radio_xara_command }}">
+    </label>
+    <label>Volací značka <span class="hint">(prázdné = {{ xara_call or 'značka gateway bez SSID' }})</span>
+      <input type="text" name="xara_call" value="{{ cfg.xara_call }}" placeholder="{{ xara_call }}">
+    </label>
+    <label>Režim
+      <select name="xara_mode">
+        {% for value, mode in xara_modes.items() %}<option value="{{ value }}" {{ 'selected' if cfg.xara_mode == value }}>{{ mode[2] }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Zvuková karta <span class="hint">(záznam i přehrávání)</span>
+      <select name="xara_audio_device">
+        <option value="">– vyberte –</option>
+        {% set ns = namespace(found=false) %}
+        {% for card in sound_cards %}
+        {% if card.value == cfg.xara_audio_device %}{% set ns.found = true %}{% endif %}
+        <option value="{{ card.value }}" {{ 'selected' if card.value == cfg.xara_audio_device }}>{{ card.label }} – {{ card.value }}</option>
+        {% endfor %}
+        {% if cfg.xara_audio_device and not ns.found %}<option value="{{ cfg.xara_audio_device }}" selected>{{ cfg.xara_audio_device }} (teď nepřipojeno)</option>{% endif %}
+      </select>
+    </label>
+    {% if not sound_cards %}<p class="hint">Žádná zvuková karta nenalezena (/proc/asound/cards). Připojte USB zvukovou kartu a obnovte stránku.</p>{% endif %}
+    <label>PTT
+      <select name="xara_ptt">
+        {% for value, text in xara_ptt.items() %}<option value="{{ value }}" {{ 'selected' if cfg.xara_ptt == value }}>{{ text }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Úroveň vysílání (dB, −40 až 0)
+      <input type="number" name="xara_drive_db" value="{{ cfg.xara_drive_db }}" min="-40" max="0" step="0.5">
+    </label>
+    <label>TCP port modemu <span class="hint">(data o 1 výš, KISS 8100; VARA používá 8300)</span>
+      <input type="number" name="xara_port" value="{{ xara_port }}" min="1024" max="65534">
+    </label>
+    <label>Port webového rozhraní XARA <span class="hint">(prázdné = vypnuto)</span>
+      <input type="number" name="xara_ui_port" value="{{ cfg.xara_ui_port or '' }}" min="1024" max="65535" placeholder="např. 8090">
+    </label>
+    <p class="hint">Konfigurace se zapíše do {{ xara_config_path }} při každém spuštění XARA; ručně upravený soubor se předtím zazálohuje jako .bak. Webové rozhraní XARA je jen pro čtení (bez ovládání vysílače). Změna se projeví po restartu XARA.</p>
+  </fieldset>
+
+  <fieldset id="rigctld">
+    <legend>CAT – rigctld (hamlib)</legend>
+    <label>rigctld – program
+      <input type="text" name="radio_rigctld_command" value="{{ cfg.radio_rigctld_command }}">
+    </label>
+    <label>Model rádia <span class="hint">(číslo modelu hamlib{% if not rig_models %}, viz <code>rigctl -l</code>{% endif %})</span>
+      <input type="text" name="rigctld_model" value="{{ cfg.rigctld_model }}" list="rig-models" inputmode="numeric" placeholder="např. 3073 = Icom IC-7300">
+      {% if rig_models %}<datalist id="rig-models">{% for number, name in rig_models %}<option value="{{ number }}">{{ name }}</option>{% endfor %}</datalist>{% endif %}
+    </label>
+    {% if cfg.rigctld_model and rig_model_names %}<p class="hint">Vybráno: {{ rig_model_names.get(cfg.rigctld_model|int, 'neznámý model') }}</p>{% endif %}
+    <label>Sériový port rádia
+      <input type="text" name="rigctld_device" value="{{ cfg.rigctld_device }}" list="serial-devices" placeholder="/dev/serial/by-id/usb-…">
+      <datalist id="serial-devices">{% for device in serial_devices %}<option value="{{ device }}"></option>{% endfor %}</datalist>
+    </label>
+    {% if not serial_devices %}<p class="hint">V /dev/serial/by-id není žádný sériový port – připojte CAT kabel rádia.</p>{% endif %}
+    <label>Rychlost
+      <select name="rigctld_speed">
+        {% for speed in rigctld_speeds %}<option value="{{ speed }}" {{ 'selected' if cfg.rigctld_speed|int == speed }}>{{ speed if speed else 'výchozí pro model' }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>TCP port rigctld
+      <input type="number" name="rigctld_port" value="{{ rigctld_port }}" min="1024" max="65535">
+    </label>
+    <p class="hint">rigctld drží sériový port rádia. XARA přes něj klíčuje PTT; VarAC může ovládat frekvenci přes stejný rigctld (Hamlib/rigctld 127.0.0.1:{{ rigctld_port }}), pokud to jeho nastavení CAT umožňuje – sériový port rádia nesmí otevřít dva programy zároveň.</p>
   </fieldset>
 
   <button type="submit">Uložit</button>

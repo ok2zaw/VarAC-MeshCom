@@ -1,7 +1,7 @@
 # MeshCom Gateway
 
 Pythonová obousměrná gateway mezi MeshCom a e-mailem. Aktuální implementace
-komunikuje s MeshCom uzlem přes UDP/JSON; VARA, Mercury a VarAC umí spouštět,
+komunikuje s MeshCom uzlem přes UDP/JSON; VARA, XARA, Mercury a VarAC umí spouštět,
 ale zprávy přes ně zatím nepředává.
 Přehled hotových funkcí a další práce je v [ROADMAP.md](ROADMAP.md), instalace
 na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
@@ -46,7 +46,9 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	(INSTALL, kapitola 9.5).
 - Zkontrolovat novou verzi aplikace a bezpečně aktualizovat `origin/main` z UI;
   update je fast-forward-only, chrání místní změny a vyžaduje síťové připojení.
-- Spouštět, zastavovat a sledovat VARA, modem Mercury a VarAC ze záložky
+- Spouštět, zastavovat a sledovat VARA, XARA (nativní modem kompatibilní
+	s VARA, zvuková karta z nabídky, PTT přes CAT/rigctld), modem Mercury,
+	rigctld a VarAC ze záložky
 	VarAC, včetně automatického startu po přihlášení do desktopu se zpožděním
 	pro každý program; instalace je v kapitole 11 [INSTALL.md](INSTALL.md).
 - Otevřít webové GUI Mercury (spektrum, vodopád, stav spojení) tlačítkem
@@ -208,7 +210,8 @@ předmět zkrátit, případně doplnit `GROUP: <číslo>`.
 - kapitola 9: tipy pro provoz – napájení Raspberry Pi 5 a start bez tlačítka
 	(`PSU_MAX_CURRENT`), trvalé logy, diagnostika RF stanic, přehled síťových
 	portů včetně souběhu s Webminem a nastavení času a NTP z webu,
-- kapitola 11: VARA, Mercury (včetně webového GUI) a VarAC na Raspberry Pi,
+- kapitola 11: VARA, XARA (nativní náhrada VARA, PTT přes CAT/rigctld),
+	Mercury (včetně webového GUI) a VarAC na Raspberry Pi,
 - kapitola 12: dva LoRa KISS TNC, LinBPQ s BBS a e-mailová brána přes Postfix.
 
 Upravená kopie LoRa TNC je ve složce [`lora_tnc/`](lora_tnc/README.md) i se

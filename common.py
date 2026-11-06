@@ -72,6 +72,25 @@ DEFAULT_CONFIG = {
     "radio_mercury_gui": False,
     "radio_mercury_gui_port": 10088,
     "radio_mercury_no_waterfall": False,
+    # XARA: native VARA-compatible modem (github.com/x0rro/xara); its config file is generated
+    # from these keys on every start. PTT goes over CAT through rigctld (hamlib).
+    "radio_xara_command": "xara",
+    "radio_xara_autostart": False,
+    "radio_xara_delay": 10,
+    "xara_call": "",               # empty = gateway callsign without SSID
+    "xara_mode": "hf2300",
+    "xara_audio_device": "",       # ALSA name, e.g. plughw:CARD=Device,DEV=0
+    "xara_ptt": "rigctld",
+    "xara_drive_db": -5,
+    "xara_port": 8300,
+    "xara_ui_port": 0,             # read-only XARA web UI; 0 = off
+    "radio_rigctld_command": "rigctld",
+    "radio_rigctld_autostart": False,
+    "radio_rigctld_delay": 5,
+    "rigctld_model": "",           # hamlib model number (rigctl -l)
+    "rigctld_device": "",
+    "rigctld_speed": 0,            # 0 = hamlib default for the model
+    "rigctld_port": 4532,
     "radio_varac_path": os.path.join(WINE_PREFIX, "drive_c", "VarAC", "VarAC.exe"),
     "radio_varac_autostart": False,
     "radio_varac_delay": 40,

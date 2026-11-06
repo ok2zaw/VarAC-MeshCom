@@ -183,5 +183,114 @@ class RadioAppsTests(unittest.TestCase):
         self.assertNotIn("button-link", page)
         self.assertIn('href="#mercury-gui"', page)
 
+    def xara_cfg(self, **extra):
+        return {**self.cfg, "callsign": "OK2ZAW-10", "xara_audio_device": "plughw:CARD=Device,DEV=0", **extra}
+
+    def test_xara_config_follows_settings(self):
+        text = radio_apps.xara_config_text(self.xara_cfg())
+        self.assertEqual(text.splitlines(), [
+            radio_apps.XARA_CONFIG_HEADER, "call = OK2ZAW", "hf = 2300", "audio = alsa",
+            "capture = plughw:CARD=Device,DEV=0", "playback = plughw:CARD=Device,DEV=0", "radio",
+            "drive-db = -5", "ptt = rigctld:127.0.0.1:4532", "addr = 127.0.0.1", "port = 8300",
+            "kiss-port = 8100"])
+        text = radio_apps.xara_config_text(self.xara_cfg(
+            xara_call="ok1abc", xara_mode="fmnarrow", xara_ptt="vox", xara_drive_db=-12.5,
+            xara_port=8400, xara_ui_port=8090, rigctld_port=4600))
+        for line in ("call = OK1ABC", "fm = narrow", "ptt = vox", "drive-db = -12.5", "port = 8400",
+                     "ui-port = 8090", "ui-addr = 0.0.0.0"):
+            self.assertIn(line + "\n", text)
+        self.assertNotIn("ui-control", text)
+        for bad in ({"xara_audio_device": ""}, {"xara_audio_device": "hw:0\nui-control"},
+                    {"xara_mode": "hf9999"}, {"xara_call": "X"}, {"xara_ptt": "dtr"}):
+            with self.assertRaises(radio_apps.RadioError):
+                radio_apps.xara_config_text(self.xara_cfg(**bad))
+
+    def test_xara_start_writes_config_and_keeps_hand_written_file(self):
+        path = os.path.join(self.tmp.name, "xara", "xara.conf")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("call = MINE\n")
+        with patch.object(radio_apps, "XARA_CONFIG_PATH", path), \
+             patch.object(radio_apps.shutil, "which", return_value="/usr/local/bin/xara"):
+            command = radio_apps.app_command("xara", self.xara_cfg())
+            radio_apps.app_command("xara", self.xara_cfg(xara_mode="hf500"))
+        self.assertEqual(command, ["xara", "--config", path])
+        with open(path + ".bak", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "call = MINE\n")
+        with open(path, encoding="utf-8") as handle:
+            self.assertIn("hf = 500\n", handle.read())
+        with self.assertRaises(radio_apps.RadioError):
+            radio_apps.app_command("xara", self.xara_cfg(radio_xara_command="/bin/sh"))
+
+    def test_rigctld_command(self):
+        cfg = {**self.cfg, "rigctld_model": 3073, "rigctld_device": "/dev/serial/by-id/usb-Icom-if00",
+               "rigctld_speed": 19200}
+        with patch.object(radio_apps.shutil, "which", return_value="/usr/bin/rigctld"):
+            self.assertEqual(radio_apps.app_command("rigctld", cfg), [
+                "rigctld", "-m", "3073", "-r", "/dev/serial/by-id/usb-Icom-if00", "-s", "19200",
+                "-T", "127.0.0.1", "-t", "4532"])
+            self.assertNotIn("-s", radio_apps.app_command("rigctld", {**cfg, "rigctld_speed": 0}))
+            for bad in ({"rigctld_model": ""}, {"rigctld_device": ""}, {"rigctld_device": "/dev/tty USB0"}):
+                with self.assertRaises(radio_apps.RadioError):
+                    radio_apps.app_command("rigctld", {**cfg, **bad})
+
+    def test_modem_port_conflicts(self):
+        cfg = {**self.cfg, "radio_vara_autostart": True, "radio_xara_autostart": True}
+        self.assertEqual(radio_apps.port_conflicts(cfg, set()), [("vara", "xara", 8300)])
+        self.assertEqual(radio_apps.port_conflicts({**cfg, "xara_port": 8301}, set()), [("vara", "xara", 8300)])
+        self.assertEqual(radio_apps.port_conflicts({**cfg, "xara_port": 8400}, set()), [])
+        self.assertEqual(radio_apps.port_conflicts(self.cfg, {"xara", "mercury"}), [])  # Mercury default -p 8400
+        self.assertEqual(radio_apps.port_conflicts({**self.cfg, "radio_mercury_args": "-x alsa"}, {"xara", "mercury"}),
+                         [("xara", "mercury", 8300)])
+
+    def test_sound_cards_put_usb_first(self):
+        cards = os.path.join(self.tmp.name, "cards")
+        with open(cards, "w", encoding="utf-8") as handle:
+            handle.write(" 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0\n                      vc4-hdmi-0\n"
+                         " 2 [Device         ]: USB-Audio - USB Audio Device\n"
+                         "                      C-Media Electronics Inc. USB Audio Device at usb-xhci\n")
+        self.assertEqual(radio_apps.sound_cards(cards), [
+            {"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB Audio Device (USB)"},
+            {"value": "plughw:CARD=vc4hdmi0,DEV=0", "usb": False, "label": "vc4-hdmi-0 (vc4-hdmi)"}])
+        self.assertEqual(radio_apps.sound_cards(os.path.join(self.tmp.name, "missing")), [])
+
+    def test_rig_models_parse_rigctl_list(self):
+        output = (" Rig #  Mfg                    Model                   Version         Status      Macro\n"
+                  "     1  Hamlib                 Dummy                   20221128.0      Stable      RIG_MODEL_DUMMY\n"
+                  "  3073  Icom                   IC-7300                 20230109.15     Stable      RIG_MODEL_IC7300\n")
+        radio_apps.rig_models.cache_clear()
+        self.addCleanup(radio_apps.rig_models.cache_clear)
+        with patch.object(radio_apps.shutil, "which", return_value="/usr/bin/rigctl"), \
+             patch.object(radio_apps.subprocess, "run", return_value=completed(stdout=output)):
+            self.assertEqual(radio_apps.rig_models(), ((1, "Hamlib Dummy"), (3073, "Icom IC-7300")))
+
+    def test_web_saves_xara_and_rigctld_settings(self):
+        form = {key: self.cfg[key] for key in webapp.RADIO_TEXT_FIELDS} | {
+            "radio_mercury_gui_port": "10088", "xara_call": "ok1abc", "xara_mode": "hf500",
+            "xara_audio_device": "plughw:CARD=Device,DEV=0", "xara_ptt": "rigctld", "xara_drive_db": "-8",
+            "xara_port": "8400", "xara_ui_port": "8090", "rigctld_model": "3073",
+            "rigctld_device": "/dev/ttyUSB0", "rigctld_speed": "19200", "rigctld_port": "4532"}
+        new_cfg, errors = webapp.save_radio_settings(form, self.cfg)
+        self.assertEqual(errors, [])
+        self.assertEqual((new_cfg["xara_call"], new_cfg["xara_mode"], new_cfg["xara_drive_db"],
+                          new_cfg["xara_port"], new_cfg["xara_ui_port"], new_cfg["rigctld_model"],
+                          new_cfg["rigctld_speed"]), ("OK1ABC", "hf500", -8.0, 8400, 8090, 3073, 19200))
+        _, errors = webapp.save_radio_settings({**form, "xara_ui_port": "8401", "xara_mode": "x",
+                                                "rigctld_speed": "1234", "xara_drive_db": "3"}, self.cfg)
+        self.assertEqual(len(errors), 4)
+        new_cfg, errors = webapp.save_radio_settings({**form, "xara_ui_port": "", "rigctld_model": ""}, self.cfg)
+        self.assertEqual((errors, new_cfg["xara_ui_port"], new_cfg["rigctld_model"]), ([], 0, ""))
+
+    def test_radio_page_shows_xara_and_port_conflict(self):
+        cfg = {"xara_ui_port": 8090, "radio_vara_autostart": True, "radio_xara_autostart": True}
+        with patch.object(webapp.radio_apps, "sound_cards",
+                          return_value=[{"value": "plughw:CARD=Device,DEV=0", "usb": True, "label": "USB"}]), \
+             patch.object(webapp.radio_apps, "rig_models", return_value=((3073, "Icom IC-7300"),)):
+            page, _ = self._radio_page(cfg, True)
+        self.assertIn('href="http://192.168.1.20:8090/"', page)
+        self.assertIn("VARA a XARA používají TCP port 8300/8301", page)
+        self.assertIn('<option value="plughw:CARD=Device,DEV=0" >', page)
+        self.assertIn('<option value="3073">Icom IC-7300</option>', page)
+
 if __name__ == "__main__":
     unittest.main()
