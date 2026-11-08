@@ -99,6 +99,18 @@ def settings(cfg: dict, own_position: dict | None = None) -> dict:
     return result
 
 
+def configured_position(cfg: dict) -> dict | None:
+    """Position typed on the APRS tab, or None when it is empty or invalid (never raises)."""
+    try:
+        latitude = float(str(cfg.get("aprs_latitude", "")).strip().replace(",", "."))
+        longitude = float(str(cfg.get("aprs_longitude", "")).strip().replace(",", "."))
+    except ValueError:
+        return None
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None
+    return {"latitude": latitude, "longitude": longitude, "source": "aprs"}
+
+
 def beacon_active(values: dict) -> bool:
     return bool(values["igate"] and values["beacon"] and values["latitude"] is not None)
 

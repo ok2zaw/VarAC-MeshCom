@@ -313,7 +313,7 @@
     return;
   }
   const stations = {{ map_stations|tojson }};
-  const own = {{ own_position|tojson }};
+  const own = {{ station_position|tojson }};
   const map = L.map(container, { scrollWheelZoom: false });
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 18,
@@ -334,7 +334,9 @@
 
   if (own) {
     label(L.circleMarker([own.latitude, own.longitude], { radius: 9, color: "#1f5fbf", weight: 3, fillColor: "#ffffff", fillOpacity: 1 }),
-      {{ (cfg.aprs_callsign or cfg.callsign)|tojson }}).addTo(map).bindPopup("vlastní poloha");
+      {{ (cfg.aprs_callsign or cfg.callsign)|tojson }}).addTo(map).bindPopup(
+      own.source === "aprs" ? "poloha iGate z nastavení APRS" :
+      own.source === "manual" ? "poloha uzlu nastavená v mapě RF stanic" : "poloha z majáku MeshCom uzlu");
   }
   for (const s of stations) {
     const fade = s.presence === "gone" ? 0.35 : 1;

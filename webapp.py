@@ -1004,6 +1004,8 @@ def aprs():
     now = time.time()
     since = now - hours * 3600
     own_position = common.get_own_position()
+    # Map centre and distances: the iGate position typed on this tab, else the node position.
+    station_position = aprs_rx.configured_position(cfg) or own_position
     stations = common.get_aprs_stations(since)
     map_stations = []
     for row in stations:
@@ -1013,9 +1015,9 @@ def aprs():
         row["last_seen_label"] = format_ts(row["last_seen"], cfg)
         row["direct"] = row["heard_from"] == row["source"]
         row["distance_km"] = None
-        if row["latitude"] is not None and own_position:
+        if row["latitude"] is not None and station_position:
             row["distance_km"] = round(common.distance_km(
-                own_position["latitude"], own_position["longitude"], row["latitude"], row["longitude"]), 1)
+                station_position["latitude"], station_position["longitude"], row["latitude"], row["longitude"]), 1)
         if row["latitude"] is not None:
             map_stations.append({key: row[key] for key in (
                 "source", "latitude", "longitude", "direct", "heard_from", "path", "symbol_table", "symbol",
@@ -1039,6 +1041,7 @@ def aprs():
     return render_template(
         "aprs.html", cfg=cfg, hours=hours, periods=APRS_PERIODS, selected=selected,
         stations=stations, map_stations=map_stations, packets=packets, own_position=own_position,
+        station_position=station_position,
         counts=counts, last_label=common.age_label(now - counts["last"]) if counts["last"] else None,
         service=service, unit_exists=os.path.exists(aprs_rx.unit_path()),
         log="\n".join(log_text.splitlines()[-40:]), igate_state=aprs_rx.igate_state(log_text),

@@ -215,6 +215,24 @@ class AprsRxTests(unittest.TestCase):
         _, errors = webapp.save_aprs_settings({"aprs_callsign": ""}, self.cfg)
         self.assertEqual(errors, [])
 
+    def test_aprs_page_uses_typed_position_for_map_and_distance(self):
+        self.assertIsNone(aprs_rx.configured_position(self.cfg))
+        self.assertIsNone(aprs_rx.configured_position({**self.cfg, "aprs_latitude": "95", "aprs_longitude": "16"}))
+        cfg = {**self.cfg, "web_password": "", "aprs_latitude": "49,1951", "aprs_longitude": "16.6068"}
+        self.assertEqual(aprs_rx.configured_position(cfg),
+                         {"latitude": 49.1951, "longitude": 16.6068, "source": "aprs"})
+        with patch.object(common, "DB_PATH", os.path.join(self.tmp.name, "gateway.db")):
+            common.init_db()
+            gateway.store_aprs_frame(ui_frame("OK1ABC-9", "APRS", [], "!5004.53N/01426.27E-Praha"))
+            with patch.object(webapp.common, "load_config", return_value=cfg), \
+                 patch.object(webapp.common, "get_own_position", return_value=None), \
+                 patch.object(webapp.aprs_rx, "status", return_value={"state": "inactive", "sub_state": "dead",
+                                                                      "since": "", "error": None, "enabled": ""}), \
+                 patch.object(webapp.aprs_rx, "recent_log", return_value=""):
+                page = webapp.app.test_client().get("/aprs").get_data(as_text=True)
+        self.assertRegex(page, r"<td>18\d\.\d km</td>")  # Brno - Praha ~ 185 km
+        self.assertIn('const own = {"latitude": 49.1951, "longitude": 16.6068, "source": "aprs"};', page)
+
     def test_port_conflicts_across_tabs(self):
         import ports
         base = {**common.DEFAULT_CONFIG}
