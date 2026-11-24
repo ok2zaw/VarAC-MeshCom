@@ -11,11 +11,26 @@
     }
     return lines;
   };
-  const color = (station, dark = false) => {
-    let hash = 0;
-    for (const c of station) hash = (Math.imul(hash, 31) + c.charCodeAt(0)) >>> 0;
-    return `hsl(${hash % 360}, 65%, ${dark ? 65 : 40}%)`;
+  // Hashing similar callsigns produced almost identical hues, especially SSIDs.
+  // Allocate a distinct categorical color to every displayed station instead.
+  const palette = {
+    light: ["#0072b2", "#d55e00", "#009e73", "#8e44ad", "#c62828",
+      "#00838f", "#c2185b", "#8d6e00", "#455a64", "#6d4c41",
+      "#3949ab", "#e65100", "#558b2f", "#6a1b9a", "#ad1457",
+      "#0277bd", "#00695c", "#9e9d24", "#5d4037", "#546e7a"],
+    dark: ["#56b4e9", "#ff9a55", "#5ed6a8", "#c79bf2", "#ff7474",
+      "#64d8df", "#f58ac3", "#eed25a", "#b0c4de", "#d7aa88",
+      "#9baaff", "#ffc078", "#b6dd72", "#e1a6ff", "#ffb0cd",
+      "#8cd8ff", "#8be0cb", "#d9e68a", "#eac2a8", "#c1d0dc"]
   };
+  const colorAssignments = stations => new Map(
+    [...new Set(stations)].sort().map((station, index) => [station, index])
+  );
+  const color = (station, dark, assignments) => {
+    const index = assignments.get(station) ?? 0;
+    return palette[dark ? "dark" : "light"][index % palette.light.length];
+  };
+  const dash = (station, assignments) => assignments.get(station) >= 10 ? "8 4" : "";
   const bounds = (values) => {
     if (!values.length) return [-1, 1];
     let low = Infinity, high = -Infinity;
@@ -35,13 +50,14 @@
     if (lo === points.length) return points[lo - 1];
     return timestamp - points[lo - 1].t <= points[lo].t - timestamp ? points[lo - 1] : points[lo];
   };
-  if (typeof module !== "undefined" && module.exports) module.exports = {segments, color, bounds, nearest};
+  if (typeof module !== "undefined" && module.exports) module.exports = {segments, colorAssignments, color, dash, bounds, nearest};
   if (typeof document === "undefined") return;
 
   const dataElement = document.getElementById("neighbor-data");
   if (!dataElement) return;
   const config = JSON.parse(dataElement.textContent);
   const history = config.history;
+  const assignments = colorAssignments(history.series.map(s => s.station));
   const enabled = new Set(history.selected);
   const legend = document.getElementById("neighbor-legend");
   const readout = document.getElementById("neighbor-readout");
@@ -101,13 +117,13 @@
       svg.append(element("text", {x: (left + right) / 2, y: (top + bottom) / 2, "text-anchor": "middle"}, "Vyberte sousedy s dostupnými měřeními."));
     }
     for (const s of series) {
-      const stroke = color(s.station, isDark());
+      const stroke = color(s.station, isDark(), assignments);
       const dots = s.points.map(p => `M${x(p.t).toFixed(2)},${y(p[metric]).toFixed(2)}h0.1`).join(" ");
-      svg.append(element("path", {d: dots, stroke, "stroke-width": 3.5, "stroke-linecap": "round", fill: "none", opacity: 0.55}));
+      svg.append(element("path", {d: dots, stroke, "stroke-width": 4, "stroke-linecap": "round", fill: "none", opacity: 0.8}));
       for (const line of segments(s.trend, config.gap_seconds)) {
         if (line.length < 2) continue;
         const path = line.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(2)},${y(p[metric]).toFixed(2)}`).join(" ");
-        svg.append(element("path", {d: path, stroke, "stroke-width": 2, fill: "none"}));
+        svg.append(element("path", {d: path, stroke, "stroke-width": 2.5, "stroke-dasharray": dash(s.station, assignments), fill: "none"}));
       }
     }
     const cursor = element("line", {y1: top, y2: bottom, class: "signal-cursor", visibility: "hidden"});
@@ -133,7 +149,7 @@
       }
       const {p, station} = closest;
       cursor.setAttribute("x1", x(p.t)); cursor.setAttribute("x2", x(p.t)); cursor.setAttribute("visibility", "visible");
-      marker.setAttribute("cx", x(p.t)); marker.setAttribute("cy", y(p[metric])); marker.setAttribute("stroke", color(station, isDark())); marker.setAttribute("visibility", "visible");
+      marker.setAttribute("cx", x(p.t)); marker.setAttribute("cy", y(p[metric])); marker.setAttribute("stroke", color(station, isDark(), assignments)); marker.setAttribute("visibility", "visible");
       readout.textContent = `${station} · ${detailed.format(new Date(p.t * 1000))}${config.utc ? " UTC" : ""} · RSSI ${p.rssi} dBm · SNR ${p.snr} dB · pořadí ${p.seq}`;
     };
     svg.onpointerleave = () => {
@@ -141,7 +157,10 @@
     };
   }
   function draw() {
-    for (const s of legend.querySelectorAll(".neighbor-swatch")) s.style.backgroundColor = color(s.dataset.station, isDark());
+    for (const s of legend.querySelectorAll(".neighbor-swatch")) {
+      s.style.backgroundColor = color(s.dataset.station, isDark(), assignments);
+      s.style.borderStyle = dash(s.dataset.station, assignments) ? "dashed" : "solid";
+    }
     drawChart("rssi", "RSSI [dBm]"); drawChart("snr", "SNR [dB]");
   }
   new MutationObserver(draw).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
