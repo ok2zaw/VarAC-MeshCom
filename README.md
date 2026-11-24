@@ -123,6 +123,31 @@ odesílá přibližně každých 30 sekund; po 90 sekundách bez čerstvého sta
 RF archiv označí stav jako neaktuální. Volba automatického obnovení po 5 s
 obnovuje celou stránku. V archivu se nic automaticky nemaže.
 
+## Signály přímo slyšených sousedů
+
+Záložka **Sousedé** (`/neighbors`) z RF archivu vytváří tabulku a dva grafy
+RSSI/SNR. Měření patří poslední značce ve zdrojové cestě: u rámce
+`OK1AAA-1,OK2RPT-9` se započítá sousedu `OK2RPT-9`. Zahrnují se pouze
+rozebrané rámce s platným MeshCom FCS a rozpoznatelnou značkou posledního
+vysílače. RF ACK bez značky a vlastní značka přijímajícího uzlu se vynechávají.
+Příznak dřívějšího průchodu serverem měření posledního RF spoje nevylučuje.
+
+Lze vybrat přijímající uzel, období od hodiny do týdne a nejvýše 20 sousedů.
+Výchozí výběr ukazuje posledních pět. Volba provozu umožňuje zahrnout relay
+provoz nebo ponechat jen vlastní rámce souseda. Tabulka obsahuje poslední
+příjem, počty měření, vlastní/přeposílané rámce a poslední, mediánové,
+minimální a maximální RSSI/SNR. Legenda umí skrývat jednotlivé stanice v obou
+grafech a přejetí přes bod ukazuje jeho hodnoty.
+
+Stejná kombinace uzlu, startu a pořadí UDP se započítá jednou podle prvního
+uloženého přijetí, i když její kopie dorazí v pozdějším období. Nové RF
+opakování s novým pořadím zůstává samostatným měřením. Tabulkové statistiky
+jsou počítané ze všech zahrnutých měření. Pro graf se uchovává omezený počet
+vzorků z časových oken se zachováním extrémů a kreslí se mediánový trend.
+Šířka okna se přizpůsobuje délce období. Dlouhá mezera nebo nový start uzlu
+přeruší čáru i uvnitř jednoho agregačního okna. Chybějící příjem se nedoplňuje
+nulovým signálem. Graf nepotřebuje externí knihovny ani internet; používá SVG.
+
 ## Formát zpráv
 
 ### E-mail → MeshCom
@@ -337,6 +362,7 @@ Postfix a Dovecot se aktualizují samostatně podle [INSTALL.md](INSTALL.md).
 - `webapp.py` – Flask webové rozhraní a validace webového formuláře
 - `common.py` – konfigurace, SQLite, Maildir a heartbeat
 - `rf_monitor.py`, `firmware/` – RF archiv, vlastní profil RAK a zdroje úprav firmwaru
+- `rf_neighbors.py`, `static/neighbors.js` – statistiky sousedů a grafy RSSI/SNR
 - `system_time.py` – časové pásmo, NTP a ruční čas přes `timedatectl`
 - `bpq_services.py`, `bpq_config.py` – služby TNC a LinBPQ, generování `bpq32.cfg`
 - `templates/`, `static/` – šablony a styly webu

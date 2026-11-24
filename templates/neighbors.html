@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Sousedé – MeshCom Gateway{% endblock %}
+{% block head_extra %}{% if refresh %}<meta http-equiv="refresh" content="30">{% endif %}{% endblock %}
+{% block content %}
+<h1>Přímo slyšení sousedé</h1>
+<p class="monitor-note">RSSI a SNR patří poslednímu vysílači v cestě přijatého rámce. Zahrnuté jsou rámce s platným MeshCom FCS; měření se nepřiřazuje vzdálenému původci přeposlané zprávy. Opakovaně doručené UDP se počítá jednou.</p>
+<p><a href="{{ url_for('rf_archive', node=node) }}">Provoz přijímajícího uzlu v RF archivu →</a></p>
+
+<form method="get" class="neighbors-form">
+  <input type="hidden" name="selection" value="1">
+  <div class="station-filter">
+    <label>Přijímající uzel <select name="node">
+      {% for n in nodes %}<option value="{{ n }}" {{ 'selected' if n == node else '' }}>{{ n }}</option>{% endfor %}
+      {% if node not in nodes %}<option value="{{ node }}" selected>{{ node }}</option>{% endif %}
+    </select></label>
+    <label>Období <select name="hours">
+      {% for h, label in [(1, '1 hodina'), (6, '6 hodin'), (24, '24 hodin'), (72, '3 dny'), (168, '7 dní')] %}<option value="{{ h }}" {{ 'selected' if hours == h else '' }}>{{ label }}</option>{% endfor %}
+    </select></label>
+    <label>Čáru přerušit po <select name="gap">
+      {% for m in [5, 15, 30, 60] %}<option value="{{ m }}" {{ 'selected' if gap == m else '' }}>{{ m }} min bez příjmu</option>{% endfor %}
+    </select></label>
+    <label>Provoz <select name="own"><option value="0">vlastní i přeposílané rámce souseda</option><option value="1" {{ 'selected' if own_only else '' }}>pouze vlastní rámce souseda</option></select></label>
+    <label>Obnovování <select name="refresh"><option value="0">ruční</option><option value="1" {{ 'selected' if refresh else '' }}>každých 30 s</option></select></label>
+    <button type="submit">Zobrazit vybrané</button>
+    <a href="{{ url_for('neighbors', node=node, hours=hours) }}">Vybrat posledních 5 sousedů</a>
+  </div>
+
+  <div class="table-wrap">
+    <table class="msg-table neighbor-table">
+      <thead><tr><th>Do grafu</th><th>Soused</th><th>Naposledy</th><th>Příjmy / vlastní / relay</th><th>Poslední RSSI / SNR</th><th>RSSI medián [min … max]</th><th>SNR medián [min … max]</th></tr></thead>
+      <tbody>{% for n in data.neighbors %}
+        <tr><td><input type="checkbox" name="station" value="{{ n.station }}" aria-label="Do grafu {{ n.station }}" {{ 'checked' if n.station in data.selected else '' }}></td>
+          <td>{{ n.station }}</td>
+          <td>{{ n.last_label }}<br><small>před {{ n.age_s }} s</small></td>
+          <td>{{ n.count }} / {{ n.own_count }} / {{ n.relay_count }}</td>
+          <td>{{ n.last_rssi }} dBm / {{ n.last_snr }} dB</td>
+          <td>{{ n.rssi_median|round(1) }} [{{ n.rssi_min }} … {{ n.rssi_max }}] dBm</td>
+          <td>{{ n.snr_median|round(1) }} [{{ n.snr_min }} … {{ n.snr_max }}] dB</td>
+        </tr>
+      {% else %}<tr><td colspan="7">Ve vybraném období nejsou měření sousedů. Zkontrolujte příjem <code>rf_rx</code> v RF archivu a zapnuté ExtUDP v uzlu.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <p class="monitor-note">Vyberte nejvýše 20 stanic a stiskněte „Zobrazit vybrané“. Tabulka zahrnuje všech {{ data.sample_count }} platných měření ve výběru. Záznamy RF ACK bez značky vysílače se nezahrnují.</p>
+</form>
+
+<div id="neighbor-legend" class="neighbor-legend" aria-label="Viditelné stanice v grafech"></div>
+<section class="signal-panel"><h2>RSSI v čase</h2><svg id="neighbor-rssi" class="signal-chart" viewBox="0 0 1000 280" role="img" aria-label="Graf RSSI sousedních stanic v dBm"></svg></section>
+<section class="signal-panel"><h2>SNR v čase</h2><svg id="neighbor-snr" class="signal-chart" viewBox="0 0 1000 280" role="img" aria-label="Graf SNR sousedních stanic v dB"></svg></section>
+<p id="neighbor-readout" class="monitor-note">Přejetím přes graf zobrazíte hodnoty nejbližšího příjmu.</p>
+<p class="monitor-note">Body představují příjmy; čára medián v oknech {{ (data.bucket_seconds / 60)|int }} min. Při velkém počtu příjmů se pro graf vybírají vzorky se zachováním krajních hodnot; statistiky v tabulce používají všechna měření. Čáry se přerušují po zvolené mezeře a při novém startu uzlu. Časová osa používá čas prvního přijetí UDP na gateway{% if display_utc %} v UTC{% else %} v časovém pásmu prohlížeče{% endif %}. Nepřítomnost bodů znamená chybějící měření, nikoli nulový signál nebo prokázaný výpadek stanice.</p>
+<noscript><p>Pro grafy zapněte JavaScript. Tabulka měření je dostupná i bez něj.</p></noscript>
+<script id="neighbor-data" type="application/json">{{ {'history': data, 'gap_seconds': gap * 60, 'utc': display_utc}|tojson }}</script>
+<script src="{{ url_for('static', filename='neighbors.js') }}" defer></script>
+{% endblock %}

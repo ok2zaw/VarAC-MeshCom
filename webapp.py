@@ -43,6 +43,7 @@ import ports
 import radio_apps
 import rtl_calibrate
 import rf_monitor
+import rf_neighbors
 import mesh_frame
 import system_time
 import update_manager
@@ -405,6 +406,37 @@ def rf_archive_export():
     return Response(rf_monitor.export_events(since, until, kind, node, **filters),
                     mimetype="application/x-ndjson",
                     headers={"Content-Disposition": 'attachment; filename="meshcom-rf.ndjson"'})
+
+
+@app.route("/neighbors")
+@requires_auth
+def neighbors():
+    cfg = common.load_config()
+    nodes = rf_neighbors.receiver_nodes()
+    node = request.args.get("node", "").strip().upper()
+    if not node:
+        configured = str(cfg.get("callsign", "")).upper()
+        node = configured if configured in nodes else nodes[0] if nodes else configured
+    if not re.fullmatch(r"[A-Z0-9-]{1,20}", node):
+        abort(400, description="Neplatná značka přijímajícího uzlu.")
+    hours = request.args.get("hours", default=24, type=int)
+    if hours not in (1, 6, 24, 72, 168):
+        hours = 24
+    gap = request.args.get("gap", default=15, type=int)
+    if gap not in (5, 15, 30, 60):
+        gap = 15
+    selected = request.args.getlist("station") if request.args.get("selection") == "1" else None
+    if selected is not None and (len(selected) > 20 or any(not re.fullmatch(r"[A-Za-z0-9/-]{3,20}", s) for s in selected)):
+        abort(400, description="Vyberte nejvýše 20 stanic s platnou značkou.")
+    now = time.time()
+    own_only = request.args.get("own") == "1"
+    data = rf_neighbors.signal_history(node, now - hours * 3600, now, selected, own_only, gap_seconds=gap * 60)
+    for row in data["neighbors"]:
+        row["last_label"] = format_ts(row["last_at"], cfg)
+        row["age_s"] = max(0, int(now - row["last_at"]))
+    return render_template("neighbors.html", cfg=cfg, data=data, nodes=nodes, node=node,
+                           hours=hours, gap=gap, own_only=own_only,
+                           refresh=request.args.get("refresh") == "1", display_utc=bool(cfg.get("display_utc")))
 
 
 @app.route("/stations")

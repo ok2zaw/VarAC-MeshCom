@@ -31,6 +31,7 @@ def init_schema(conn):
             payload_json TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_rf_events_received ON rf_events(received_at);
+        CREATE INDEX IF NOT EXISTS idx_rf_events_node_time ON rf_events(node, received_at, id);
         CREATE INDEX IF NOT EXISTS idx_rf_events_session ON rf_events(node, boot_id, event_seq);
         CREATE INDEX IF NOT EXISTS idx_rf_events_type_id ON rf_events(packet_type, id DESC);
         CREATE TABLE IF NOT EXISTS rf_frame_details (
