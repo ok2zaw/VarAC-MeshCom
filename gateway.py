@@ -33,6 +33,7 @@ from email.mime.text import MIMEText
 
 import aprs_rx
 import common
+import rf_monitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -224,7 +225,24 @@ def udp_listener():
             finish("neplatná struktura", "JSON paket není objekt.")
             continue
 
-        if packet.get("type") in {"ack", "msg"}:
+        packet_type = packet.get("type")
+        if not isinstance(packet_type, str):
+            finish("neplatný typ", "JSON paket nemá textový typ.")
+            continue
+
+        if packet_type in rf_monitor.EVENT_TYPES:
+            try:
+                rf_monitor.record_event(packet, peer)
+            except ValueError as exc:
+                finish("neplatný RF monitor", str(exc))
+            except sqlite3.Error as exc:
+                log.warning("Could not archive firmware monitor event: %s", exc)
+                finish("chyba RF archivu", str(exc))
+            else:
+                finish("RF příjem archivován" if packet_type == "rf_rx" else "stav uzlu archivován")
+            continue
+
+        if packet_type in {"ack", "msg"}:
             try:
                 delivery = common.track_delivery(packet, cfg.get("callsign", ""))
             except sqlite3.Error as exc:

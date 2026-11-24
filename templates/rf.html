@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}RF archiv – MeshCom Gateway{% endblock %}
+{% block head_extra %}{% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block content %}
+<h1>RF archiv</h1>
+<p class="monitor-note">Jednotlivé RF příjmy a stav uzlu z upraveného firmwaru. Opakované příjmy se uchovávají. <a href="{{ url_for('rf_archive') }}">Obnovit</a></p>
+
+{% for s in statuses %}
+<div class="card {{ 'ok' if s.online else 'bad' }}">
+  <div class="card-label">{{ s.node }} · {{ 'Hlásí se' if s.online else 'Bez čerstvého stavu' }} · před {{ s.age_s }} s</div>
+  <div class="card-value">{{ 'RX monitor zapnutý' if s.rx_enabled else 'RX monitor vypnutý' }}</div>
+  <div class="card-sub">FW {{ s.firmware }} · {{ s.config_label }} · profil {{ s.profile }}</div>
+  <div class="card-sub">Provoz {{ s.uptime_label }} · volná RAM {{ s.heap_bytes }} B · {{ s.reset_label }} ({{ s.reset_reason }})</div>
+  <div class="card-sub">RX události {{ s.rx_seen }} · zahozeno {{ s.rx_dropped }} · potlačeno {{ s.rx_suppressed }} · fronta {{ s.queue_depth }} (maximum {{ s.queue_high_water }}) · chyby UDP {{ s.udp_failures }}</div>
+  <div class="card-sub">Stav přijat {{ s.ts_label }} · start {{ s.boot_id }} · {{ s.peer }} · chyby formátování {{ s.format_failures }}</div>
+  {% if s.node|upper != cfg.callsign|upper %}<p>Gateway má nastavenou značku {{ cfg.callsign }}. Pro rozpoznání vlastních zpráv ji ověřte v <a href="{{ url_for('config_page') }}">nastavení</a>.</p>{% endif %}
+</div>
+{% else %}
+<p class="monitor-note">Stav uzlu zatím nepřišel. Upravený firmware jej posílá přes ExtUDP přibližně každých 30 sekund.</p>
+{% endfor %}
+
+<form method="get" class="station-filter">
+  <label>Od <input type="date" name="start" value="{{ start_day }}"></label>
+  <label>Do <input type="date" name="end" value="{{ end_day }}"></label>
+  <label>Uzel <input name="node" value="{{ node }}" maxlength="20" placeholder="OK2ZAW-30"></label>
+  <label>Odesílatel RF <input name="source" value="{{ filters.source }}" maxlength="20" placeholder="značka původce"></label>
+  <label>Cíl RF <input name="destination" value="{{ filters.destination }}" maxlength="20" placeholder="skupina, * nebo značka"></label>
+  <label>Start uzlu <input name="boot" value="{{ filters.boot }}" maxlength="16" placeholder="ID startu"></label>
+  <label>Událost
+    <select name="kind">
+      <option value="">vše</option>
+      <option value="rf_rx" {{ 'selected' if kind == 'rf_rx' else '' }}>RF příjem</option>
+      <option value="node_status" {{ 'selected' if kind == 'node_status' else '' }}>stav uzlu</option>
+    </select>
+  </label>
+  <label>RF rámec
+    <select name="frame_type"><option value="">vše</option>
+      {% for key, label in frame_types.items() %}<option value="{{ key }}" {{ 'selected' if filters.frame_type == key else '' }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Kontrola rámce
+    <select name="decode_status"><option value="">vše</option>
+      {% for key, label in decode_states.items() %}<option value="{{ key }}" {{ 'selected' if filters.decode_status == key else '' }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Obnovování
+    <select name="refresh"><option value="0">ruční</option><option value="1" {{ 'selected' if refresh else '' }}>každých 5 s</option></select>
+  </label>
+  <button type="submit">Zobrazit</button>
+  <a href="{{ url_for('rf_archive_export', **filter_args) }}">Stáhnout NDJSON</a>
+</form>
+<p>Celkem {{ total }} událostí ve výběru. Archiv se automaticky nemaže; doručení UDP může mít mezery.</p>
+
+{% if sessions %}
+<details class="radio-log">
+  <summary>Starty uzlu ve vybraném období · posledních {{ sessions|length }}</summary>
+  <div class="table-wrap"><table class="msg-table">
+    <thead><tr><th>Uzel / start</th><th>Od / do</th><th>RF datagramy</th><th>Opakované UDP</th><th>Mezery pořadí</th></tr></thead>
+    <tbody>{% for s in sessions %}<tr>
+      <td>{{ s.node }}<br><a href="{{ url_for('rf_archive', start=start_day, end=end_day, node=s.node, boot=s.boot_id) }}">{{ s.boot_id }}</a></td>
+      <td>{{ s.first_label }}<br>{{ s.last_label }}</td><td>{{ s.rx_packets }}</td><td>{{ s.udp_duplicates }}</td>
+      <td>{{ s.sequence_gaps if s.sequence_gaps is not none else '—' }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="monitor-note">Mezery jsou chybějící pořadí mezi přijatými RF událostmi v období. Mohou vzniknout ve firmwaru i přenosu a mohou se doplnit opožděným UDP. Opakování stejné RF zprávy mají vlastní pořadí; „opakované UDP“ znamená stejný start a stejné pořadí. Při přetečení čítače se odhad mezer nezobrazuje. Přehled startů používá období a filtr uzlu/startu.</p>
+</details>
+{% endif %}
+
+<div class="table-wrap">
+  <table class="msg-table udp-table">
+    <thead><tr><th>Přijato na Pi</th><th>Uzel a start</th><th>Typ a kontrola</th><th>Odkud → kam</th><th>Pořadí / ID zprávy</th><th>Čas uzlu / signál</th><th>Obsah</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td>{{ e.ts_label }}</td>
+        <td>{{ e.node }}<br><small>{{ e.boot_id }}</small></td>
+        <td>{% if e.decoded %}{{ frame_types[e.decoded.frame_type] }}<br><small>{{ decode_states[e.decoded.decode_status] }}</small>{% else %}Stav uzlu{% endif %}</td>
+        <td>{% if e.decoded %}{{ e.decoded.source or '—' }} → {{ e.decoded.destination or '—' }}
+          {% if e.decoded.source_path %}<br><small>Cesta: {{ e.decoded.source_path }}</small>{% endif %}
+          {% if e.decoded.via_server %}<br><small>Příznak průchodu serverem</small>{% endif %}
+          {% if e.decoded.remaining_hops is not none %}<br><small>Zbývající hops: {{ e.decoded.remaining_hops }}</small>{% endif %}
+        {% else %}—{% endif %}</td>
+        <td>{{ e.event_seq if e.event_seq is not none else '—' }}{% if e.decoded and e.decoded.msg_id %}<br><code>{{ e.decoded.msg_id }}</code>{% endif %}</td>
+        <td>{{ e.uptime_ms }} ms{% if e.rssi is not none %}<br>{{ e.rssi }} dBm / {{ e.snr }} dB{% endif %}</td>
+        <td>{% if e.decoded %}
+          {% if e.decoded.payload_text %}<div class="udp-payload">{{ e.decoded.payload_text }}</div>{% endif %}
+          {% if e.decoded.acked_msg_id %}Potvrzuje zprávu <code>{{ e.decoded.acked_msg_id }}</code>{% endif %}
+          {% if e.decoded.error %}<div>{{ e.decoded.error }}</div>{% endif %}
+        {% endif %}
+        {% if e.raw_hex %}<details><summary>HEX · {{ (e.raw_hex|length / 2)|int }} B</summary><code class="udp-payload">{{ e.raw_hex }}</code></details>{% endif %}
+        <details><summary>JSON</summary><code class="udp-payload">{{ e.payload_json }}</code></details></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7">Zatím žádné události. RF archiv vyžaduje firmware s rozšířeným UDP monitorem; běžné ExtUDP zprávy najdete v UDP monitoru.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if events|length == 100 %}
+<p><a href="{{ url_for('rf_archive', before=events[-1].id, **filter_args) }}">Starší události</a></p>
+{% endif %}
+{% endblock %}

@@ -6,8 +6,18 @@ ale zprávy přes ně zatím nepředává.
 Přehled hotových funkcí a další práce je v [ROADMAP.md](ROADMAP.md), instalace
 na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 
+Poznámky k úpravám firmwaru RAK4630, obnově konfigurace a rozšíření
+RF monitoru přes UDP jsou v [MESHCOM_FIRMWARE_NOTES.md](MESHCOM_FIRMWARE_NOTES.md).
+Zdroje úprav a postup sestavení jsou ve [firmware/README.md](firmware/README.md).
+
 ## Co projekt umí
 
+- S upraveným firmwarem ukládat jednotlivé RF příjmy včetně původních bajtů
+  a opakování do trvalého **RF archivu**. Rámce ukazuje i čitelně: text,
+  původce, cíl, cestu, ID, zbývající hops a příznak průchodu serverem.
+  Rozlišuje text, polohu, HEY, HN a RF ACK, kontroluje MeshCom FCS.
+  Zobrazuje čerstvost stavu uzlu, důvod resetu, obnovovací profil a počty ztrát.
+  Nabízí filtry, přehled startů, obnovování po 5 s a export NDJSON.
 - Přijímat zprávy z nakonfigurované MeshCom skupiny a odesílat je přes SMTP.
 - Načítat e-maily z `Maildir/new`; volitelně stahovat nepřečtené zprávy přes IMAP.
 - Převádět e-maily na MeshCom zprávy, dlouhé texty rozdělit podle limitu a
@@ -76,6 +86,42 @@ na Raspberry Pi/Debian v [INSTALL.md](INSTALL.md).
 	a Mercury smí sdílet 8300, protože běží vždy jen jeden z nich. Přehled
 	portů je v kapitole 9.4 [INSTALL.md](INSTALL.md).
 - Ukládat historii, chyby a heartbeat do SQLite.
+
+## RF archiv s upraveným firmwarem
+
+Na uzlu zapněte `--extudp on` a nastavte `--extudpip <IP-gateway>`.
+V nastavení gateway ověřte IP uzlu, port `1799` a značku `OK2ZAW-30`.
+Pokud má uzel zapnuté `--nopmother on`, surový RF monitor je v našem firmwaru
+potlačený a nadále přichází pouze stav uzlu a běžné povolené ExtUDP zprávy.
+
+Stránka **RF archiv** (`/rf`) umí filtrovat podle přijímajícího uzlu,
+ID jeho startu, odesílatele RF, cíle, typu rámce a výsledku rozboru.
+Filtry platí také pro stránkování a stažení NDJSON. U rámců je zvlášť čitelný
+obsah, původní HEX a původní UDP JSON. Příznak `lora` ani dobré RSSI/SNR
+nevylučují předchozí průchod zprávy přes internet; k tomu slouží také
+dekódovaný příznak průchodu serverem.
+
+Přehled startů rozlišuje opakovaně přijaté UDP se stejným pořadím a nový RF
+příjem se samostatným pořadím. Mezery se počítají pouze mezi přijatými čísly
+ve vybraném období. Mohou vzniknout ve firmwaru i v síti a mohou se doplnit
+opožděným datagramem; nepředstavují přesné měření ztrát samotné sítě.
+MeshCom FCS je součet bajtů rámce, nikoli výsledek rádiové CRC.
+
+Při aktualizaci gateway se starší RF záznamy doplní o samostatný dekódovaný
+rozbor po dávkách; původní bajty a JSON zůstanou zachované. U velkého archivu
+proto může první start trvat déle. Konverzace a přeposílání e-mailů zachovávají
+svá dosavadní pravidla. Tyto změny nevyžadují nový firmware uzlu s nasazenou v2.
+
+Po přenesení aktualizovaných souborů na Raspberry Pi restartujte obě služby:
+
+```sh
+sudo systemctl restart meshcom-gateway meshcom-web
+```
+
+V **UDP monitoru** lze vybrat `node_status` nebo `rf_rx`. Stav se z uzlu
+odesílá přibližně každých 30 sekund; po 90 sekundách bez čerstvého stavu
+RF archiv označí stav jako neaktuální. Volba automatického obnovení po 5 s
+obnovuje celou stránku. V archivu se nic automaticky nemaže.
 
 ## Formát zpráv
 
@@ -290,6 +336,7 @@ Postfix a Dovecot se aktualizují samostatně podle [INSTALL.md](INSTALL.md).
 - `gateway.py` – UDP, SMTP, Maildir a volitelné IMAP zpracování
 - `webapp.py` – Flask webové rozhraní a validace webového formuláře
 - `common.py` – konfigurace, SQLite, Maildir a heartbeat
+- `rf_monitor.py`, `firmware/` – RF archiv, vlastní profil RAK a zdroje úprav firmwaru
 - `system_time.py` – časové pásmo, NTP a ruční čas přes `timedatectl`
 - `bpq_services.py`, `bpq_config.py` – služby TNC a LinBPQ, generování `bpq32.cfg`
 - `templates/`, `static/` – šablony a styly webu

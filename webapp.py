@@ -42,6 +42,8 @@ import gateway
 import ports
 import radio_apps
 import rtl_calibrate
+import rf_monitor
+import mesh_frame
 import system_time
 import update_manager
 
@@ -317,7 +319,21 @@ def udp_monitor():
     direction = request.args.get("direction", "")
     if direction not in {"rx", "tx"}:
         direction = ""
-    packets = common.get_udp_packets(limit=200, direction=direction or None)
+    packet_type = request.args.get("type", "")
+    packet_types = ("rf_rx", "node_status", "msg", "pos", "tele", "ack")
+    if packet_type not in packet_types:
+        packet_type = ""
+    packets = common.get_udp_packets(limit=300 if packet_type else 200, direction=direction or None)
+    if packet_type:
+        filtered = []
+        for row in packets:
+            try:
+                packet = gateway.decode_udp_packet(row["payload"].encode("utf-8"))
+            except (ValueError, UnicodeError):
+                continue
+            if isinstance(packet, dict) and packet.get("type") == packet_type:
+                filtered.append(row)
+        packets = filtered[:200]
     for row in packets:
         row["ts_label"] = format_ts(row["ts"], cfg)
     gateway_hb = common.get_heartbeat("gateway")
@@ -325,11 +341,70 @@ def udp_monitor():
     return render_template(
         "udp.html",
         cfg=cfg, now=now, packets=packets, direction=direction,
+        packet_type=packet_type, packet_types=packet_types,
         udp=common.get_udp_activity(),
         gateway_alive=gateway_hb is not None and now - gateway_hb < 30,
         listener_alive=listener_hb is not None and now - listener_hb < 30,
         local_ip=local_ip_towards(str(cfg.get("mesh_node_ip", ""))),
     )
+
+
+def rf_archive_filters(cfg):
+    start_day, end_day, since, until = parse_date_range(default_days=1, cfg=cfg)
+    kind = request.args.get("kind", "")
+    if kind not in rf_monitor.EVENT_TYPES:
+        kind = ""
+    node = request.args.get("node", "").strip().upper()[:20]
+    filters = {key: request.args.get(key, "").strip() for key in
+               ("boot", "source", "destination", "frame_type", "decode_status")}
+    if filters["boot"] and not re.fullmatch(r"[0-9A-Fa-f]{16}", filters["boot"]):
+        abort(400, description="ID startu musí mít 16 hexadecimálních znaků.")
+    for key in ("source", "destination"):
+        if len(filters[key]) > 20:
+            abort(400, description="Značka nebo cíl může mít nejvýše 20 znaků.")
+    if filters["frame_type"] not in mesh_frame.FRAME_TYPES:
+        filters["frame_type"] = ""
+    if filters["decode_status"] not in mesh_frame.DECODE_STATES:
+        filters["decode_status"] = ""
+    return start_day, end_day, since, until, kind, node, filters
+
+
+@app.route("/rf")
+@requires_auth
+def rf_archive():
+    cfg = common.load_config()
+    start_day, end_day, since, until, kind, node, filters = rf_archive_filters(cfg)
+    before = request.args.get("before", type=int)
+    if before is not None and not 0 < before < 2**63:
+        before = None
+    events = rf_monitor.get_events(since, until, kind, node, before=before, **filters)
+    for row in events:
+        row["ts_label"] = format_ts(row["received_at"], cfg)
+    statuses = rf_monitor.latest_statuses(node=node)
+    for row in statuses:
+        row["ts_label"] = format_ts(row["received_at"], cfg)
+    sessions = rf_monitor.get_sessions(since, until, node, filters["boot"])
+    for row in sessions:
+        row["first_label"] = format_ts(row["first_at"], cfg)
+        row["last_label"] = format_ts(row["last_at"], cfg)
+    refresh = request.args.get("refresh") == "1" and before is None
+    filter_args = {"start": start_day.isoformat(), "end": end_day.isoformat(),
+                   "kind": kind, "node": node, **filters}
+    return render_template("rf.html", cfg=cfg, events=events, statuses=statuses,
+                           start_day=start_day, end_day=end_day, kind=kind, node=node,
+                           total=rf_monitor.count_events(since, until, kind, node, **filters),
+                           filters=filters, filter_args=filter_args, refresh=refresh, sessions=sessions,
+                           frame_types=mesh_frame.FRAME_TYPES, decode_states=mesh_frame.DECODE_STATES)
+
+
+@app.route("/rf/export")
+@requires_auth
+def rf_archive_export():
+    cfg = common.load_config()
+    _, _, since, until, kind, node, filters = rf_archive_filters(cfg)
+    return Response(rf_monitor.export_events(since, until, kind, node, **filters),
+                    mimetype="application/x-ndjson",
+                    headers={"Content-Disposition": 'attachment; filename="meshcom-rf.ndjson"'})
 
 
 @app.route("/stations")

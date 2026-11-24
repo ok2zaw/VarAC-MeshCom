@@ -1,0 +1,177 @@
+diff --git a/src/extudp_functions.cpp b/src/extudp_functions.cpp
+index 8e414ba..4632e11 100644
+--- a/src/extudp_functions.cpp
++++ b/src/extudp_functions.cpp
+@@ -978,6 +978,28 @@ static void sendExternJson(const uint8_t *json, uint16_t jlen)
+   UdpExtern.endPacket();
+ }
+ 
++#if defined(MC_RF_MONITOR) && MC_RF_MONITOR
++bool externMonitorReady()
++{
++  return bEXTUDP && hasExternIPaddress && neth.hasIPaddress &&
++         strlen(meshcom_settings.node_extern) > 7;
++}
++
++bool sendExternMonitor(const uint8_t *json, uint16_t len)
++{
++  if(!externMonitorReady() || !json || !len)
++    return false;
++  if(UdpExtern.beginPacket(apip, EXTERN_PORT) != 1)
++    return false;
++  if(UdpExtern.write(json, len) != len)
++  {
++    resetExternUDP();  // discard the incomplete datagram
++    return false;
++  }
++  return UdpExtern.endPacket() == 1;
++}
++#endif
++
+ void flushExternQueue()
+ {
+     for(int i = 0; i < MAX_EXTERN_QUEUE; i++)
+diff --git a/src/extudp_functions.h b/src/extudp_functions.h
+index 5b0caa4..de10064 100644
+--- a/src/extudp_functions.h
++++ b/src/extudp_functions.h
+@@ -15,6 +15,10 @@ void sendExtern(bool bUDP, char *src_type, uint8_t buffer[500], uint16_t buflen,
+ void queueExtern(char *src_type, uint8_t buffer[264], uint16_t buflen, int16_t rssi, int8_t snr);
+ void flushExternQueue();
+ void sendExternHeartbeat();
++#if defined(MC_RF_MONITOR) && MC_RF_MONITOR
++bool externMonitorReady();
++bool sendExternMonitor(const uint8_t *json, uint16_t len);
++#endif
+ void resetExternUDP();
+ // ETH-06: nRF52 W5100S builds: drop the EXTUDP socket before a chip hardware reset (nrf_eth.cpp initETH_HW()).
+ void externUdpChipReset();
+diff --git a/src/nrf52/nrf52_flash.cpp b/src/nrf52/nrf52_flash.cpp
+index 47b0c3a..3064449 100644
+--- a/src/nrf52/nrf52_flash.cpp
++++ b/src/nrf52/nrf52_flash.cpp
+@@ -22,6 +22,7 @@
+ #include <rm_nodes_store.h>	  // RM GUI known-node store (contract C1): codec, slot logic, rmNodesLoad/Save/Wipe
+ 
+ #include "WisBlock-API.h"
++#include "local_defaults.h"
+ #include "settings_store_nrf52.h" // settingsStoreLoad()/settingsStoreSave()/writeFileAtomic(), the keyed store (W3/C1 cutover)
+ #include "ble_settings_v1.h"	  // s_ble_settings_v1, bleSettingsFromV1()/bleSettingsToV1() -- the frozen legacy blob layout
+ 
+@@ -563,6 +564,7 @@ void init_flash(void)
+ 		Serial.printf("[SETST];path;keyed;fields_set=%u;unknown_keys=%u;malformed_lines=%u;lines_total=%u\n",
+ 					  (unsigned)keyed.stats.fields_set, (unsigned)keyed.stats.unknown_keys,
+ 					  (unsigned)keyed.stats.malformed_lines, (unsigned)keyed.stats.lines_total);
++		localSettingsSetSource("keyed");
+ 		sanitize_loaded_settings();
+ 		countersLoad();
+ 		log_settings();
+@@ -677,6 +679,8 @@ void init_flash(void)
+ 		lora_file.close();
+ 	}
+ 	bleSettingsFromV1(legacy_v1_image, meshcom_settings);
++	if (strcmp(localSettingsSource(), "profile") != 0)
++		localSettingsSetSource("legacy");
+ 	// bleSettingsFromV1() skips node_msgid on purpose (a BLE write must not rewind the counter --
+ 	// ble_settings_v1.cpp). Here the blob IS the only source of the counter, so copy it explicitly.
+ 	meshcom_settings.node_msgid = legacy_v1_image.node_msgid;
+@@ -776,6 +780,7 @@ boolean save_settings(void)
+ void flash_reset(void)
+ {
+ 	Serial.printf("[SETST];flash_reset;enter\n");
++	localSettingsSetSource("defaults");
+ 
+ 	// Targeted removal instead of InternalFS.format() (Fable verdict, docs/w3-settings-verdict.md,
+ 	// Finding 2): format() erases EVERY file on the internal flash filesystem, not just this
+@@ -821,6 +826,7 @@ void flash_reset(void)
+ 		// geschriebenen Abbilds wird gleich danach festgehalten, sobald meshcom_settings selbst wieder
+ 		// gefuellt ist -- siehe init_flash()).
+ 		s_meshcom_settings default_settings;
++		applyLocalDefaults(default_settings);
+ 		default_settings.node_hamnet_only = 2; // factory default: auto network (a wipe only; loaded settings keep their value)
+ 		s_ble_settings_v1 &default_image = bleSettingsV1Scratch(); // shared loop-task scratch, see above
+ 		bleSettingsToV1(default_settings, default_image);
+@@ -847,6 +853,7 @@ void flash_reset(void)
+ 		if (lora_file.open(settings_name, FILE_O_WRITE))
+ 		{
+ 			s_meshcom_settings default_settings;
++			applyLocalDefaults(default_settings);
+ 			default_settings.node_hamnet_only = 2; // factory default: auto network (a wipe only; loaded settings keep their value)
+ 			s_ble_settings_v1 &default_image = bleSettingsV1Scratch(); // shared loop-task scratch, see above
+ 			bleSettingsToV1(default_settings, default_image);
+diff --git a/src/nrf52/nrf52_main.cpp b/src/nrf52/nrf52_main.cpp
+index ee9b3f9..da8cfdd 100644
+--- a/src/nrf52/nrf52_main.cpp
++++ b/src/nrf52/nrf52_main.cpp
+@@ -21,6 +21,8 @@
+ #include "lora_syncword.h"     // one-byte -> SX126x two-byte sync word
+ #include <settings_sanitize.h> // #1132: resolve_tx_power sentinel normalization
+ #include <extudp_functions.h>
++#include "rf_monitor.h"
++#include "local_defaults.h"
+ 
+ #include <TinyGPSPlus.h>
+ 
+@@ -294,6 +296,8 @@ bool nrf52LastRxQuality(int16_t *rssi, int8_t *snr)
+ 
+ static void rxsOnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+ {
++    // Capture before shared ACK handling, decoding and duplicate/filter branches.
++    rfMonitorCapture(payload, size, rssi, snr);
+     g_lastRxRssi = rssi;
+     g_lastRxSnr = snr;
+     g_lastRxValid = true;
+@@ -686,7 +690,8 @@ void nrf52setup()
+ 
+     // Geloescht wird nur bei echter Layout-Aenderung, nicht bei jedem neuen
+     // Build-Datum. Siehe configuration_global.h.
+-    if(!flashLayoutCompatible(meshcom_settings.node_fversion) || bClear)
++    const bool resetSettings = !flashLayoutCompatible(meshcom_settings.node_fversion) || bClear;
++    if(resetSettings)
+     {
+         Serial.printf("[INIT]...FLASH cleared, Settings-Layout %i -> %i\n",
+                       meshcom_settings.node_fversion, FLASH_STRUCT_VERSION);
+@@ -699,9 +704,14 @@ void nrf52setup()
+                       meshcom_settings.node_fversion, FLASH_VERSION);
+     }
+ 
+-    if(bClear)
++    // Reload after every reset so a stale RAM image cannot overwrite the profile.
++    if(resetSettings)
+         init_flash();
+ 
++    // Recover an unconfigured legacy/default image with the local profile too.
++    if(isNodeUnconfigured(meshcom_settings.node_call))
++        applyLocalDefaults(meshcom_settings);
++
+     meshcom_settings.node_fversion = FLASH_STRUCT_VERSION;
+     meshcom_settings.node_mversion = MODUL_HARDWARE;
+     meshcom_settings.node_cleanflash = 0;
+@@ -1279,6 +1289,7 @@ void nrf52setup()
+     delay(100);
+ 
+     seedRandomFromHw();   // ETH-04 F3: after init_ble() (SoftDevice up), before the DHCP xid
++    rfMonitorBegin();
+ 
+     if (bGATEWAY || bWEBSERVER)
+     {
+@@ -2734,6 +2745,7 @@ void nrf52loop()
+         bSPI_ETH_Active = true;   // SPI guard: Ethernet owns bus
+         getExternUDP();
+         flushExternQueue();
++        rfMonitorPoll();   // One monitor datagram per pass, under the SPI guard.
+         bSPI_ETH_Active = false;  // SPI guard: release bus
+         if(bPendingRadioRx) { bPendingRadioRx = false; startRadioReceive(); }
+     }
+diff --git a/variants/wiscore_rak4631/platformio.ini b/variants/wiscore_rak4631/platformio.ini
+index ad366fb..2752d93 100644
+--- a/variants/wiscore_rak4631/platformio.ini
++++ b/variants/wiscore_rak4631/platformio.ini
+@@ -34,4 +34,6 @@ build_flags =
+ 	${nrf52_base.build_flags}
+ 	-I variants/${this.__env__}
+ 	-D DISABLE_NET_CONSOLE
++	-D MC_RF_MONITOR=1
++	-D MC_LOCAL_DEFAULTS=1
+ 	-Os
+\ No newline at end of file

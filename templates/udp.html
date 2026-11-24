@@ -4,6 +4,7 @@
 {% block content %}
 <h1>UDP monitor</h1>
 <p class="monitor-note">Surové datagramy mezi Raspberry Pi a MeshCom uzlem (posledních {{ packets|length }}). Stránka se obnovuje každých 5 sekund.</p>
+<p><a href="{{ url_for('rf_archive') }}">RF archiv s čitelnými rámci a stavem uzlu →</a></p>
 
 <div class="cards">
   <div class="card {{ 'ok' if listener_alive else 'bad' }}">
@@ -56,6 +57,12 @@
       <option value="" {{ 'selected' if not direction else '' }}>vše</option>
       <option value="rx" {{ 'selected' if direction == 'rx' else '' }}>přijato (uzel → Pi)</option>
       <option value="tx" {{ 'selected' if direction == 'tx' else '' }}>odesláno (Pi → uzel)</option>
+    </select>
+  </label>
+  <label>Typ datagramu
+    <select name="type" onchange="this.form.submit()">
+      <option value="">vše</option>
+      {% for t in packet_types %}<option value="{{ t }}" {{ 'selected' if packet_type == t else '' }}>{{ t }}</option>{% endfor %}
     </select>
   </label>
   <noscript><button type="submit">Filtrovat</button></noscript>

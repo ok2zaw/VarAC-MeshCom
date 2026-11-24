@@ -13,6 +13,8 @@ import sqlite3
 import threading
 import time
 
+import rf_monitor
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 DB_PATH = os.path.join(BASE_DIR, "gateway.db")
@@ -295,6 +297,7 @@ def get_db() -> sqlite3.Connection:
 def init_db() -> None:
     conn = get_db()
     try:
+        rf_monitor.init_schema(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
